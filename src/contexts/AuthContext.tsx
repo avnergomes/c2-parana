@@ -29,14 +29,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const fetchSubscription = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .single()
+    try {
+      const { data } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', userId)
+        .maybeSingle()
 
-    if (!error && data) {
-      setSubscription(data as Subscription)
+      if (data) {
+        setSubscription(data as Subscription)
+      } else {
+        // Sem subscription - será tratado como 'none' pelo accessStatus
+        setSubscription(null)
+      }
+    } catch (e) {
+      console.error('Erro ao buscar subscription:', e)
+      setSubscription(null)
     }
   }
 
