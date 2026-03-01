@@ -26,7 +26,6 @@ export async function initSentry(): Promise<void> {
 
   try {
     // Importacao dinamica para evitar erro quando pacote nao esta instalado
-    // @ts-expect-error - modulo pode nao existir
     SentryModule = await import('@sentry/react')
 
     SentryModule.init({
