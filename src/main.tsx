@@ -19,10 +19,13 @@ const queryClient = new QueryClient({
   },
 })
 
+// basename para GitHub Pages (em dev é vazio, em prod é /c2-parana)
+const basename = import.meta.env.PROD ? '/c2-parana' : ''
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <App />
       </BrowserRouter>
     </QueryClientProvider>
