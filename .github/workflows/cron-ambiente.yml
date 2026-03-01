@@ -1,0 +1,31 @@
+# .github/workflows/cron-ambiente.yml
+name: ETL Meio Ambiente (FIRMS + ANA + AQICN)
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # A cada 6 horas
+  workflow_dispatch:
+
+jobs:
+  etl-ambiente:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r scripts/requirements.txt
+
+      - name: Executar ETL Ambiente
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NASA_FIRMS_KEY: ${{ secrets.NASA_FIRMS_KEY }}
+          WAQI_TOKEN: ${{ secrets.WAQI_TOKEN }}
+        run: python scripts/etl_ambiente.py
