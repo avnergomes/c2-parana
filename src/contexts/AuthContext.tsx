@@ -49,6 +49,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    // Timeout de segurança - nunca ficar travado mais de 5s
+    const timeout = setTimeout(() => {
+      if (loading) setLoading(false)
+    }, 5000)
+
     // Pegar sessão inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -58,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setLoading(false)
       }
-    })
+    }).catch(() => setLoading(false))
 
     // Ouvir mudanças de auth
     const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange(
@@ -75,7 +80,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     )
 
-    return () => authListener.unsubscribe()
+    return () => {
+      clearTimeout(timeout)
+      authListener.unsubscribe()
+    }
   }, [])
 
   const accessStatus = React.useMemo((): AuthContextType['accessStatus'] => {
