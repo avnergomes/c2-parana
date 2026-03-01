@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>C2 Paraná</title>
+  <script>
+    // Redirect para index.html com o path como query string
+    // Técnica de GitHub Pages SPA: github.com/rafgraph/spa-github-pages
+    var segmentCount = 1; // 1 = repositório em subpasta (/c2-parana/); 0 = domínio raiz
+    var l = window.location;
+    l.replace(
+      l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+      l.pathname.split('/').slice(0, 1 + segmentCount).join('/') + '/?/' +
+      l.pathname.slice(1).split('/').slice(segmentCount).join('/').replace(/&/g, '~and~') +
+      (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+      l.hash
+    );
+  </script>
+</head>
+<body>
+  Redirecionando...
+</body>
+</html>

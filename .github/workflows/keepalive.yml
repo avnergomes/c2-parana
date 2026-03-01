@@ -1,0 +1,25 @@
+# .github/workflows/keepalive.yml
+# Evita que o repositório seja desativado por inatividade (GitHub desativa após 60 dias sem push)
+name: Keepalive
+
+on:
+  schedule:
+    - cron: '0 12 1 * *'   # Dia 1 de cada mês ao meio-dia UTC
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update keepalive timestamp
+        run: |
+          echo "Last keepalive: $(date -u)" > .keepalive
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .keepalive
+          git commit -m "chore: keepalive $(date -u +%Y-%m)" || echo "Nothing to commit"
+          git push || echo "Nothing to push"
