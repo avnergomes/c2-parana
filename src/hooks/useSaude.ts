@@ -63,10 +63,14 @@ export function useDengueSerie(ibgeCode?: string, semanas = 12) {
         .select('ibge_code, municipality_name, epidemiological_week, year, cases, alert_level')
         .order('year', { ascending: true })
         .order('epidemiological_week', { ascending: true })
-        .limit(semanas * (ibgeCode ? 1 : 399))
 
       if (ibgeCode) {
-        query = query.eq('ibge_code', ibgeCode)
+        // Com filtro por município: limitar pelas semanas solicitadas
+        query = query.eq('ibge_code', ibgeCode).limit(semanas)
+      } else {
+        // Sem filtro: limitar a 1000 rows para respeitar o default do Supabase
+        // e evitar queries muito grandes
+        query = query.limit(1000)
       }
 
       const { data } = await query as { data: Array<{

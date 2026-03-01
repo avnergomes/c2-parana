@@ -1,4 +1,47 @@
 // src/types/agro.ts
+
+// Tipos para KPIs do data_cache
+export interface VbpKpis {
+  vbp_total_brl: number
+  vbp_lavoura_brl: number
+  vbp_pecuaria_brl: number
+  variacao_yoy: number
+  ano_referencia: string | number
+}
+
+export interface ComexKpis {
+  exportacoes_usd: number
+  importacoes_usd: number
+  saldo_usd: number
+  variacao_export_yoy: number
+  mes_referencia: string
+}
+
+export interface EmpregoAgroKpis {
+  estoque_atual: number
+  saldo_mes: number
+  variacao_yoy: number
+  ano_referencia?: string | number
+  serie?: Array<{
+    ano?: string | number
+    ano_mes?: string
+    pessoal_ocupado?: number
+    saldo?: number
+  }>
+}
+
+export interface CreditoRuralKpis {
+  total_ano_brl: number
+  num_contratos: number
+  variacao_yoy: number
+  ano_referencia?: string | number
+  serie?: Array<{
+    ano_mes: string
+    valor: number
+  }>
+}
+
+// Tipos originais
 export interface PrecoSIMA {
   produto: string
   variedade: string

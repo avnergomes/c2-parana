@@ -3,6 +3,7 @@
 
 import os
 import requests
+from datetime import datetime
 from supabase import create_client
 from dotenv import load_dotenv
 
@@ -10,6 +11,9 @@ load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+# Ano atual para queries dinâmicas
+CURRENT_YEAR = datetime.now().year
 
 # Geocodes IBGE dos municípios do PR (os 399)
 # Buscar do IBGE API para lista completa
@@ -32,7 +36,8 @@ def get_pr_municipalities():
 
 def fetch_dengue(ibge_code: str, weeks: int = 4) -> list:
     """Busca alertas de dengue do InfoDengue para um município."""
-    url = f"https://info.dengue.mat.br/api/alertcity?geocode={ibge_code}&disease=dengue&format=json&ew_start=1&ew_end=52&ey_start=2024&ey_end=2025"
+    # Usar ano atual dinamicamente
+    url = f"https://info.dengue.mat.br/api/alertcity?geocode={ibge_code}&disease=dengue&format=json&ew_start=1&ew_end=52&ey_start={CURRENT_YEAR - 1}&ey_end={CURRENT_YEAR}"
     try:
         resp = requests.get(url, timeout=30)
         if resp.status_code == 200:
@@ -59,7 +64,7 @@ def main():
         for rec in records[-4:]:  # últimas 4 semanas
             try:
                 se = int(rec.get("SE", 0))
-                year = int(str(se)[:4]) if se > 10000 else 2025
+                year = int(str(se)[:4]) if se > 10000 else CURRENT_YEAR
                 week = int(str(se)[4:]) if se > 10000 else se
 
                 all_dengue.append({

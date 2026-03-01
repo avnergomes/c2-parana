@@ -5,6 +5,7 @@ import os
 import io
 import csv
 import requests
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from supabase import create_client
 from dotenv import load_dotenv
@@ -90,39 +91,141 @@ def fetch_aqicn():
     print(f"AQICN: {len(records)} cidades coletadas")
     return records
 
+# Estações fluviométricas principais do PR
+ESTACOES_RIOS_PR = [
+    {"code": "65017006", "name": "Porto Amazonas", "river": "Rio Iguaçu", "municipality": "Porto Amazonas", "lat": -25.55, "lon": -49.88},
+    {"code": "65310000", "name": "União da Vitória", "river": "Rio Iguaçu", "municipality": "União da Vitória", "lat": -26.23, "lon": -51.08},
+    {"code": "64507000", "name": "Porto São José", "river": "Rio Paraná", "municipality": "São Pedro do Paraná", "lat": -22.76, "lon": -53.17},
+    {"code": "64620000", "name": "Salto Caxias", "river": "Rio Iguaçu", "municipality": "Capitão Leônidas Marques", "lat": -25.54, "lon": -53.50},
+    {"code": "65035000", "name": "São José dos Pinhais", "river": "Rio Iguaçu", "municipality": "São José dos Pinhais", "lat": -25.53, "lon": -49.20},
+    {"code": "64693000", "name": "Foz do Iguaçu", "river": "Rio Iguaçu", "municipality": "Foz do Iguaçu", "lat": -25.59, "lon": -54.58},
+    {"code": "65155000", "name": "São Mateus do Sul", "river": "Rio Iguaçu", "municipality": "São Mateus do Sul", "lat": -25.87, "lon": -50.38},
+    {"code": "64475000", "name": "Tibagi", "river": "Rio Tibagi", "municipality": "Tibagi", "lat": -24.51, "lon": -50.41},
+]
+
+# Cotas de alerta por estação (em cm)
+COTAS_ALERTA = {
+    "65017006": {"attention": 300, "alert": 450, "emergency": 600},
+    "65310000": {"attention": 500, "alert": 700, "emergency": 900},
+    "64507000": {"attention": 400, "alert": 600, "emergency": 800},
+    "64620000": {"attention": 450, "alert": 650, "emergency": 850},
+    "65035000": {"attention": 250, "alert": 400, "emergency": 550},
+    "64693000": {"attention": 350, "alert": 500, "emergency": 700},
+    "65155000": {"attention": 400, "alert": 600, "emergency": 800},
+    "64475000": {"attention": 300, "alert": 500, "emergency": 700},
+}
+
+
+def get_alert_level(station_code: str, level_cm: float) -> str:
+    """Calcula nível de alerta baseado na cota."""
+    if level_cm is None:
+        return "normal"
+    cotas = COTAS_ALERTA.get(station_code, {"attention": 200, "alert": 400, "emergency": 600})
+    if level_cm >= cotas["emergency"]:
+        return "emergency"
+    elif level_cm >= cotas["alert"]:
+        return "alert"
+    elif level_cm >= cotas["attention"]:
+        return "attention"
+    return "normal"
+
+
 def fetch_ana_rivers():
-    """Busca estações e nível de rios ANA para o PR."""
-    url = "https://www.ana.gov.br/ANA_Telemetrica/api/estacoes?codEstado=41"
-    try:
-        resp = requests.get(url, timeout=30)
-        data = resp.json()
+    """Busca dados telemétricos de rios do PR via API SAR/ANA."""
+    records = []
 
-        estacoes = data if isinstance(data, list) else data.get("items", [])
-        records = []
+    for est in ESTACOES_RIOS_PR:
+        try:
+            now = datetime.now()
+            date_end = now.strftime("%d/%m/%Y")
+            date_start = (now - timedelta(days=1)).strftime("%d/%m/%Y")
 
-        for est in estacoes[:50]:  # Limitar para não sobrecarregar
-            try:
-                records.append({
-                    "station_code": str(est.get("codEstacao") or est.get("codigo", "")),
-                    "station_name": est.get("nomeEstacao") or est.get("nome", ""),
-                    "river_name": est.get("nomeRio") or est.get("rio"),
-                    "municipality": est.get("municipio"),
-                    "ibge_code": str(est.get("codMunicipio") or "") or None,
-                    "latitude": float(est.get("latitude", 0)) if est.get("latitude") else None,
-                    "longitude": float(est.get("longitude", 0)) if est.get("longitude") else None,
-                    "level_cm": float(est.get("cota") or est.get("nivel_cm", 0)) if est.get("cota") or est.get("nivel_cm") else None,
-                    "flow_m3s": None,
-                    "alert_level": "normal",
-                    "observed_at": est.get("dataMedicao") or datetime.now().isoformat(),
-                })
-            except:
+            url = f"https://telemetriaws1.ana.gov.br/ServiceANA.asmx/DadosHidrometeorologicos?codEstacao={est['code']}&dataInicio={date_start}&dataFim={date_end}"
+            resp = requests.get(url, timeout=30)
+
+            if resp.status_code != 200:
+                print(f"  Estação {est['code']}: HTTP {resp.status_code}")
                 continue
 
-        print(f"ANA: {len(records)} estações coletadas")
-        return records
-    except Exception as e:
-        print(f"Erro ANA: {e}")
-        return []
+            # Parse XML
+            root = ET.fromstring(resp.content)
+
+            # Buscar dados - tentar diferentes paths
+            dados = root.findall('.//DadosHidrometereologicos')
+            if not dados:
+                dados = root.findall('.//{http://www.ana.gov.br/}DadosHidrometereologicos')
+            if not dados:
+                # Tentar buscar qualquer elemento com dados
+                for elem in root.iter():
+                    if 'Nivel' in elem.tag or 'nivel' in elem.tag.lower():
+                        nivel_val = elem.text
+                        if nivel_val:
+                            records.append({
+                                "station_code": est["code"],
+                                "station_name": est["name"],
+                                "river_name": est["river"],
+                                "municipality": est["municipality"],
+                                "latitude": est.get("lat"),
+                                "longitude": est.get("lon"),
+                                "level_cm": float(nivel_val) if nivel_val.strip() else None,
+                                "flow_m3s": None,
+                                "alert_level": get_alert_level(est["code"], float(nivel_val) if nivel_val.strip() else None),
+                                "observed_at": now.isoformat(),
+                            })
+                            break
+                continue
+
+            # Pegar último registro (mais recente)
+            ultimo = dados[-1]
+
+            # Tentar diferentes formatos de tag
+            nivel = None
+            vazao = None
+            data_hora = None
+
+            for child in ultimo:
+                tag_lower = child.tag.lower().split('}')[-1]
+                if 'nivel' in tag_lower:
+                    nivel = child.text
+                elif 'vazao' in tag_lower:
+                    vazao = child.text
+                elif 'datahora' in tag_lower or 'data' in tag_lower:
+                    data_hora = child.text
+
+            level_cm = float(nivel) if nivel and nivel.strip() else None
+            flow_m3s = float(vazao) if vazao and vazao.strip() else None
+
+            records.append({
+                "station_code": est["code"],
+                "station_name": est["name"],
+                "river_name": est["river"],
+                "municipality": est["municipality"],
+                "latitude": est.get("lat"),
+                "longitude": est.get("lon"),
+                "level_cm": level_cm,
+                "flow_m3s": flow_m3s,
+                "alert_level": get_alert_level(est["code"], level_cm),
+                "observed_at": data_hora or now.isoformat(),
+            })
+
+        except Exception as e:
+            print(f"  Erro estação {est['code']}: {e}")
+            # Adicionar com dados de fallback
+            records.append({
+                "station_code": est["code"],
+                "station_name": est["name"],
+                "river_name": est["river"],
+                "municipality": est["municipality"],
+                "latitude": est.get("lat"),
+                "longitude": est.get("lon"),
+                "level_cm": None,
+                "flow_m3s": None,
+                "alert_level": "normal",
+                "observed_at": datetime.now().isoformat(),
+            })
+
+    print(f"ANA: {len(records)} estações coletadas")
+    return records
 
 def main():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -131,7 +234,12 @@ def main():
     print("Buscando focos de calor NASA FIRMS...")
     spots = fetch_firms()
     if spots:
-        supabase.table("fire_spots").upsert(spots).execute()
+        # Upsert com on_conflict para evitar duplicatas
+        supabase.table("fire_spots").upsert(
+            spots,
+            on_conflict="latitude,longitude,acq_date"
+        ).execute()
+        print(f"  {len(spots)} focos inseridos/atualizados")
         # Limpar focos com mais de 30 dias
         cutoff = (datetime.now() - timedelta(days=30)).date().isoformat()
         supabase.table("fire_spots").delete().lt("acq_date", cutoff).execute()
@@ -140,10 +248,12 @@ def main():
     print("Buscando qualidade do ar AQICN...")
     aq_records = fetch_aqicn()
     if aq_records:
-        supabase.table("air_quality").insert(aq_records).execute()
-        # Limpar dados com mais de 7 dias
-        cutoff = (datetime.now() - timedelta(days=7)).isoformat()
-        supabase.table("air_quality").delete().lt("observed_at", cutoff).execute()
+        # Upsert por cidade (mantém apenas a leitura mais recente)
+        supabase.table("air_quality").upsert(
+            aq_records,
+            on_conflict="city"
+        ).execute()
+        print(f"  {len(aq_records)} cidades atualizadas")
 
     # ANA
     print("Buscando nível dos rios ANA...")

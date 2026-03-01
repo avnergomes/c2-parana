@@ -3,6 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import viteCompression from 'vite-plugin-compression'
 import path from 'path'
+import pkg from './package.json'
 
 export default defineConfig(({ mode }) => ({
   plugins: [
@@ -15,9 +16,9 @@ export default defineConfig(({ mode }) => ({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  // Para GitHub Pages com repositório em subpasta
-  // Alterar para o nome real do repo:
-  base: mode === 'production' ? '/c2-parana/' : '/',
+  // Base path para GitHub Pages — derivado do nome do package
+  // Se o repo mudar de nome, atualizar o "name" no package.json
+  base: mode === 'production' ? `/${pkg.name}/` : '/',
   build: {
     rollupOptions: {
       output: {

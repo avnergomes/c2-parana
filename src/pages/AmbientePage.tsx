@@ -52,7 +52,11 @@ export function AmbientePage() {
           value={aqiMedio ?? '—'}
           accentColor={aqiMedio && aqiMedio > 100 ? 'red' : aqiMedio && aqiMedio > 50 ? 'yellow' : 'green'}
         />
-        <KpiCard label="Cobertura monitoramento" value="4 cidades" accentColor="blue" />
+        <KpiCard
+          label="Cobertura monitoramento"
+          value={aqData?.length ? `${aqData.length} cidades` : '—'}
+          accentColor="blue"
+        />
       </div>
 
       {/* Qualidade do Ar */}

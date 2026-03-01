@@ -1,9 +1,10 @@
 # .github/workflows/cron-noticias.yml
+# Budget: ~6 min/dia (12 exec × ~30s)
 name: ETL Notícias (RSS)
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # A cada 15 minutos
+    - cron: '0 */2 * * *'   # A cada 2 horas (12 exec/dia)
   workflow_dispatch:
 
 jobs:

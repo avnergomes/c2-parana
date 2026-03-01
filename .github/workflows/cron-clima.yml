@@ -1,10 +1,11 @@
 # .github/workflows/cron-clima.yml
+# Budget: ~12 min/dia (24 exec × ~30s)
 name: ETL Clima (INMET)
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # A cada 30 minutos
-  workflow_dispatch:           # Execução manual
+    - cron: '0 * * * *'   # A cada hora (24 exec/dia)
+  workflow_dispatch:
 
 jobs:
   etl-clima:

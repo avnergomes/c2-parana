@@ -115,7 +115,9 @@ export function AgroPage() {
           )}
           {activeTab === 'emprego' && emprego?.serie && (
             <SerieChart
-              data={emprego.serie.map(d => ({ ano_mes: d.ano_mes, value: d.saldo }))}
+              data={emprego.serie
+                .filter(d => d.ano_mes && d.saldo !== undefined)
+                .map(d => ({ ano_mes: d.ano_mes!, value: d.saldo! }))}
               label="Saldo de Empregos Agropecuários (CAGED)"
               color="#10b981"
               formatValue={v => (v >= 0 ? '+' : '') + formatNumber(v)}
@@ -130,16 +132,40 @@ export function AgroPage() {
             />
           )}
           {activeTab === 'comex' && (
-            <div className="card p-6 text-center text-text-secondary">
-              <p>Dados ComexStat — utilize o módulo Datageo ComexStat existente ou aguarde integração.</p>
-              <a
-                href="https://avnergomes.github.io/comexstat-parana"
-                target="_blank"
-                rel="noopener"
-                className="text-accent-blue hover:underline text-sm mt-2 inline-block"
-              >
-                Abrir Datageo ComexStat →
-              </a>
+            <div className="space-y-4">
+              {comex ? (
+                <>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <KpiCard
+                      label="Exportações"
+                      value={`US$ ${(comex.exportacoes_usd / 1e9).toFixed(2)} bi`}
+                      accentColor="green"
+                    />
+                    <KpiCard
+                      label="Importações"
+                      value={`US$ ${(comex.importacoes_usd / 1e9).toFixed(2)} bi`}
+                      accentColor="blue"
+                    />
+                    <KpiCard
+                      label="Saldo Comercial"
+                      value={`US$ ${(comex.saldo_usd / 1e9).toFixed(2)} bi`}
+                      accentColor={comex.saldo_usd > 0 ? 'green' : 'red'}
+                    />
+                    <KpiCard
+                      label="Variação Export. YoY"
+                      value={`${comex.variacao_export_yoy > 0 ? '+' : ''}${comex.variacao_export_yoy.toFixed(1)}%`}
+                      accentColor={comex.variacao_export_yoy > 0 ? 'green' : 'red'}
+                    />
+                  </div>
+                  <p className="text-text-muted text-xs">
+                    Fonte: MDIC ComexStat · Ref: {comex.mes_referencia || '—'}
+                  </p>
+                </>
+              ) : (
+                <div className="card p-6 text-center text-text-secondary">
+                  <p>Dados ComexStat não disponíveis. Execute o ETL Agro.</p>
+                </div>
+              )}
             </div>
           )}
         </ErrorBoundary>

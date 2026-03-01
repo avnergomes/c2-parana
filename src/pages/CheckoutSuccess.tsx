@@ -8,9 +8,23 @@ export function CheckoutSuccessPage() {
   const { refreshSubscription } = useAuth()
 
   useEffect(() => {
+    // Primeiro refresh imediato
     refreshSubscription()
-    const timer = setTimeout(() => navigate('/dashboard'), 4000)
-    return () => clearTimeout(timer)
+
+    // Segundo refresh após 2s (dá tempo pro webhook do Stripe)
+    const retryTimer1 = setTimeout(() => refreshSubscription(), 2000)
+
+    // Terceiro refresh após 4s (fallback extra)
+    const retryTimer2 = setTimeout(() => refreshSubscription(), 4000)
+
+    // Redirecionar após 6s (dá tempo para os refreshes completarem)
+    const navTimer = setTimeout(() => navigate('/dashboard'), 6000)
+
+    return () => {
+      clearTimeout(retryTimer1)
+      clearTimeout(retryTimer2)
+      clearTimeout(navTimer)
+    }
   }, [])
 
   return (
