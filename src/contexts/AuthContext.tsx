@@ -101,7 +101,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [subscription, loading])
 
   const hasAccess = accessStatus === 'trialing' || accessStatus === 'active'
-  const isPro = hasAccess && (subscription?.plan === 'pro' || subscription?.plan === 'enterprise' || accessStatus === 'trialing')
+  // Trial sempre dá acesso Pro (o trigger SQL cria com plan='pro')
+  // Se mudar isso, atualizar também handle_new_subscription() no SQL
+  const isPro = hasAccess && (subscription?.plan === 'pro' || subscription?.plan === 'enterprise')
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })

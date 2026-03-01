@@ -10,6 +10,7 @@ import { ClimaLayer } from './layers/ClimaLayer'
 import { QueimadaLayer } from './layers/QueimadaLayer'
 import { DengueLayer } from './layers/DengueLayer'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { MapDataProvider } from '@/contexts/MapDataContext'
 import type { GeoJsonObject, Feature } from 'geojson'
 import type { Layer } from 'leaflet'
 import { useAuth } from '@/contexts/AuthContext'
@@ -37,10 +38,7 @@ export function MapModule() {
         const ibgeRes = await fetch('https://servicodados.ibge.gov.br/api/v2/malhas/41/?resolucao=5&formato=application/vnd.geo+json')
         return ibgeRes.json() as Promise<GeoJsonObject>
       }
-      const data = await res.json() as GeoJsonObject
-      // Salvar referência global para as layers
-      window.municipiosGeoJSON = data
-      return data
+      return res.json() as Promise<GeoJsonObject>
     },
     staleTime: Infinity, // GeoJSON não muda
   })
@@ -66,74 +64,76 @@ export function MapModule() {
   }
 
   return (
-    <div className="relative h-full w-full">
-      <LeafletMap
-        center={PR_CENTER}
-        zoom={7}
-        zoomControl={false}
-        maxBounds={PR_BOUNDS}
-        maxBoundsViscosity={0.8}
-        minZoom={6}
-        maxZoom={13}
-        className="h-full w-full"
-        style={{ background: '#0f1117' }}
-      >
-        <ZoomControl position="bottomright" />
+    <MapDataProvider geoJSON={geoJSON || null}>
+      <div className="relative h-full w-full">
+        <LeafletMap
+          center={PR_CENTER}
+          zoom={7}
+          zoomControl={false}
+          maxBounds={PR_BOUNDS}
+          maxBoundsViscosity={0.8}
+          minZoom={6}
+          maxZoom={13}
+          className="h-full w-full"
+          style={{ background: '#0f1117' }}
+        >
+          <ZoomControl position="bottomright" />
 
-        {/* Tile escuro */}
-        <TileLayer url={DARK_TILE} attribution={TILE_ATTRIBUTION} />
+          {/* Tile escuro */}
+          <TileLayer url={DARK_TILE} attribution={TILE_ATTRIBUTION} />
 
-        {/* Municípios base (sempre visível) */}
-        {geoJSON && (
-          <GeoJSON
-            key="municipios-base"
-            data={geoJSON}
-            style={() => ({
-              fillColor: '#1f2937',
-              fillOpacity: 0.3,
-              color: '#374151',
-              weight: 0.8,
-            })}
-            onEachFeature={onEachFeature}
+          {/* Municípios base (sempre visível) */}
+          {geoJSON && (
+            <GeoJSON
+              key="municipios-base"
+              data={geoJSON}
+              style={() => ({
+                fillColor: '#1f2937',
+                fillOpacity: 0.3,
+                color: '#374151',
+                weight: 0.8,
+              })}
+              onEachFeature={onEachFeature}
+            />
+          )}
+
+          {/* Layer: Dengue (coroplético) */}
+          {activeLayers.includes('dengue') && isPro && geoJSON && (
+            <ErrorBoundary moduleName="layer dengue">
+              <DengueLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Clima (marcadores) */}
+          {activeLayers.includes('clima') && (
+            <ErrorBoundary moduleName="layer clima">
+              <ClimaLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Queimadas (pontos) */}
+          {activeLayers.includes('queimadas') && isPro && (
+            <ErrorBoundary moduleName="layer queimadas">
+              <QueimadaLayer />
+            </ErrorBoundary>
+          )}
+        </LeafletMap>
+
+        {/* Controles sobrepostos */}
+        <LayerToggle activeLayers={activeLayers} onToggle={toggleLayer} />
+        <MapLegend activeLayers={activeLayers} />
+
+        {selectedFeature && (
+          <MunicipalityPopup
+            ibgeCode={selectedFeature.ibge}
+            name={selectedFeature.name}
+            onClose={() => {
+              setSelectedFeature(null)
+              selectMunicipality(null)
+            }}
           />
         )}
-
-        {/* Layer: Dengue (coroplético) */}
-        {activeLayers.includes('dengue') && isPro && geoJSON && (
-          <ErrorBoundary moduleName="layer dengue">
-            <DengueLayer />
-          </ErrorBoundary>
-        )}
-
-        {/* Layer: Clima (marcadores) */}
-        {activeLayers.includes('clima') && (
-          <ErrorBoundary moduleName="layer clima">
-            <ClimaLayer />
-          </ErrorBoundary>
-        )}
-
-        {/* Layer: Queimadas (pontos) */}
-        {activeLayers.includes('queimadas') && isPro && (
-          <ErrorBoundary moduleName="layer queimadas">
-            <QueimadaLayer />
-          </ErrorBoundary>
-        )}
-      </LeafletMap>
-
-      {/* Controles sobrepostos */}
-      <LayerToggle activeLayers={activeLayers} onToggle={toggleLayer} />
-      <MapLegend activeLayers={activeLayers} />
-
-      {selectedFeature && (
-        <MunicipalityPopup
-          ibgeCode={selectedFeature.ibge}
-          name={selectedFeature.name}
-          onClose={() => {
-            setSelectedFeature(null)
-            selectMunicipality(null)
-          }}
-        />
-      )}
-    </div>
+      </div>
+    </MapDataProvider>
   )
 }

@@ -1,4 +1,5 @@
 # .github/workflows/cron-ambiente.yml
+# Budget: ~3 min/dia (4 exec × ~45s)
 name: ETL Meio Ambiente (FIRMS + ANA + AQICN)
 
 on:

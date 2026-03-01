@@ -1,9 +1,20 @@
 // src/pages/LegislativoPage.tsx
-// Redirecionar para NoticiasPage tab ALEP ou mostrar conteúdo dedicado
 import { AlepFeed } from '@/components/noticias/AlepFeed'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
+import { PaywallModal } from '@/components/ui/PaywallModal'
+import { useAuth } from '@/contexts/AuthContext'
 
 export function LegislativoPage() {
+  const { isPro } = useAuth()
+
+  if (!isPro) {
+    return (
+      <div className="p-6">
+        <PaywallModal feature="Legislativo" requiredPlan="pro" onClose={() => history.back()} />
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-4xl">
       <div>

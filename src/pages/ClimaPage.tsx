@@ -39,7 +39,12 @@ export function ClimaPage() {
         <KpiCard label="Estações ativas" value={estacoes?.length ?? '—'} accentColor="blue" loading={loadingEstacoes} />
         <KpiCard label="Temp. média PR" value={`${avgTemp}°C`} accentColor="blue" loading={loadingEstacoes} />
         <KpiCard label="Alertas ativos" value={alertasAtivos.length} accentColor={alertasAtivos.length > 0 ? 'red' : 'green'} loading={loadingAlertas} />
-        <KpiCard label="Cobertura" value="~20 estações" accentColor="green" />
+        <KpiCard
+          label="Cobertura"
+          value={estacoes?.length ? `${estacoes.length} estações` : '—'}
+          accentColor="green"
+          loading={loadingEstacoes}
+        />
       </div>
 
       {/* Alertas INMET */}

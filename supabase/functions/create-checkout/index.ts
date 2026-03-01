@@ -43,14 +43,21 @@ serve(async (req) => {
     })
 
     // Mapa de price IDs por plano (criar no Stripe dashboard e colocar aqui)
-    const PRICE_IDS: Record<string, string> = {
-      solo: Deno.env.get('STRIPE_PRICE_SOLO') || '',
-      pro: Deno.env.get('STRIPE_PRICE_PRO') || '',
+    const priceId = plan === 'pro'
+      ? Deno.env.get('STRIPE_PRICE_PRO')
+      : Deno.env.get('STRIPE_PRICE_SOLO')
+
+    if (!priceId) {
+      return new Response(
+        JSON.stringify({
+          error: `Stripe price ID para plano "${plan}" nao configurado. Configure STRIPE_PRICE_${plan.toUpperCase()} nos secrets do Supabase.`
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
-    const priceId = PRICE_IDS[plan]
-    if (!priceId) {
-      return new Response(JSON.stringify({ error: 'Invalid plan' }), {
+    if (!['solo', 'pro'].includes(plan)) {
+      return new Response(JSON.stringify({ error: 'Plano invalido. Use "solo" ou "pro".' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
