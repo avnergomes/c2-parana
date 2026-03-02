@@ -32,6 +32,13 @@ def fetch_firms():
     url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_KEY}/VIIRS_SNPP_NRT/{PR_BBOX}/1"
     try:
         resp = requests.get(url, timeout=60)
+
+        if resp.status_code in (403, 429):
+            print(f"  FIRMS retornou {resp.status_code} - limite de API atingido")
+            if NASA_FIRMS_KEY == "DEMO_KEY":
+                print("  Configure NASA_FIRMS_KEY em GitHub Secrets!")
+            return []
+
         resp.raise_for_status()
 
         reader = csv.DictReader(io.StringIO(resp.text))
@@ -230,41 +237,106 @@ def fetch_ana_rivers():
 def main():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    # NASA FIRMS
-    print("Buscando focos de calor NASA FIRMS...")
-    spots = fetch_firms()
-    if spots:
-        # Upsert com on_conflict para evitar duplicatas
-        supabase.table("fire_spots").upsert(
-            spots,
-            on_conflict="latitude,longitude,acq_date"
-        ).execute()
-        print(f"  {len(spots)} focos inseridos/atualizados")
-        # Limpar focos com mais de 30 dias
-        cutoff = (datetime.now() - timedelta(days=30)).date().isoformat()
-        supabase.table("fire_spots").delete().lt("acq_date", cutoff).execute()
+    errors = []
 
-    # AQICN
-    print("Buscando qualidade do ar AQICN...")
-    aq_records = fetch_aqicn()
-    if aq_records:
-        # Upsert por cidade (mantém apenas a leitura mais recente)
-        supabase.table("air_quality").upsert(
-            aq_records,
-            on_conflict="city"
-        ).execute()
-        print(f"  {len(aq_records)} cidades atualizadas")
+    # === NASA FIRMS ===
+    print("=" * 40)
+    print("1/3 Buscando focos de calor NASA FIRMS...")
+    try:
+        if NASA_FIRMS_KEY == "DEMO_KEY":
+            print("  AVISO: Usando DEMO_KEY! Configure NASA_FIRMS_KEY nos secrets do GitHub.")
+            print("  Obtenha sua key em: https://firms.modaps.eosdis.nasa.gov/api/area/")
 
-    # ANA
-    print("Buscando nível dos rios ANA...")
-    rivers = fetch_ana_rivers()
-    if rivers:
-        supabase.table("river_levels").upsert(
-            rivers,
-            on_conflict="station_code"
-        ).execute()
+        spots = fetch_firms()
+        if spots:
+            try:
+                supabase.table("fire_spots").upsert(
+                    spots,
+                    on_conflict="latitude,longitude,acq_date"
+                ).execute()
+                print(f"  {len(spots)} focos inseridos/atualizados")
+            except Exception as e:
+                if "no unique or exclusion constraint" in str(e):
+                    # Fallback: deletar focos recentes e inserir novos
+                    cutoff = (datetime.now() - timedelta(days=1)).date().isoformat()
+                    supabase.table("fire_spots").delete().gte("acq_date", cutoff).execute()
+                    supabase.table("fire_spots").insert(spots).execute()
+                    print(f"  {len(spots)} focos inseridos (sem upsert)")
+                else:
+                    raise
 
-    print("ETL Ambiente concluído!")
+            # Limpar focos com mais de 30 dias
+            cutoff = (datetime.now() - timedelta(days=30)).date().isoformat()
+            supabase.table("fire_spots").delete().lt("acq_date", cutoff).execute()
+        else:
+            print("  Nenhum foco encontrado (pode ser periodo sem queimadas)")
+    except Exception as e:
+        print(f"  ERRO FIRMS: {e}")
+        errors.append(f"FIRMS: {e}")
+
+    # === AQICN ===
+    print("=" * 40)
+    print("2/3 Buscando qualidade do ar AQICN...")
+    try:
+        if WAQI_TOKEN == "demo":
+            print("  AVISO: Usando token demo! Configure WAQI_TOKEN nos secrets do GitHub.")
+            print("  Obtenha seu token em: https://aqicn.org/data-platform/token/")
+
+        aq_records = fetch_aqicn()
+        if aq_records:
+            try:
+                supabase.table("air_quality").upsert(
+                    aq_records,
+                    on_conflict="city"
+                ).execute()
+                print(f"  {len(aq_records)} cidades atualizadas")
+            except Exception as e:
+                if "no unique or exclusion constraint" in str(e):
+                    # Fallback: deletar e inserir
+                    for rec in aq_records:
+                        supabase.table("air_quality").delete().eq("city", rec["city"]).execute()
+                    supabase.table("air_quality").insert(aq_records).execute()
+                    print(f"  {len(aq_records)} cidades inseridas (sem upsert)")
+                else:
+                    raise
+    except Exception as e:
+        print(f"  ERRO AQICN: {e}")
+        errors.append(f"AQICN: {e}")
+
+    # === ANA Rios ===
+    print("=" * 40)
+    print("3/3 Buscando nivel dos rios ANA...")
+    try:
+        rivers = fetch_ana_rivers()
+        if rivers:
+            try:
+                supabase.table("river_levels").upsert(
+                    rivers,
+                    on_conflict="station_code"
+                ).execute()
+                print(f"  {len(rivers)} estacoes atualizadas")
+            except Exception as e:
+                if "no unique or exclusion constraint" in str(e):
+                    # Fallback: deletar e inserir
+                    for station in ESTACOES_RIOS_PR:
+                        supabase.table("river_levels").delete().eq("station_code", station["code"]).execute()
+                    supabase.table("river_levels").insert(rivers).execute()
+                    print(f"  {len(rivers)} estacoes inseridas (sem upsert)")
+                else:
+                    raise
+    except Exception as e:
+        print(f"  ERRO ANA: {e}")
+        errors.append(f"ANA: {e}")
+
+    # === Resumo ===
+    print("=" * 40)
+    if errors:
+        print(f"ETL Ambiente concluido com {len(errors)} erro(s):")
+        for err in errors:
+            print(f"  - {err}")
+        # NAO sair com exit code 1 - dados parciais sao melhores que nenhum dado
+    else:
+        print("ETL Ambiente concluido com sucesso!")
 
 if __name__ == "__main__":
     main()

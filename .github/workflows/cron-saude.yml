@@ -1,11 +1,21 @@
 # .github/workflows/cron-saude.yml
-# Budget: ~0.1 min/dia (1 exec/semana × ~10min)
-name: ETL Saúde (InfoDengue)
+# Budget: ~1 min/dia (3 exec/semana x ~1-2min modo rapido, 1 exec/semana x ~10min modo completo)
+name: ETL Saude (InfoDengue)
 
 on:
   schedule:
-    - cron: '0 8 * * 1'   # Toda segunda-feira às 8h UTC (5h BRT)
+    - cron: '0 8 * * 1'    # Segunda: run completo (399 municipios)
+    - cron: '0 12 * * 3,5' # Quarta e sexta: run rapido (top 50)
   workflow_dispatch:
+    inputs:
+      full_run:
+        description: 'Rodar todos os 399 municipios?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   etl-saude:
@@ -20,11 +30,12 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Instalar dependências
+      - name: Instalar dependencias
         run: pip install -r scripts/requirements.txt
 
-      - name: Executar ETL Saúde
+      - name: Executar ETL Saude
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FULL_RUN: ${{ github.event.schedule == '0 8 * * 1' && 'true' || github.event.inputs.full_run || 'false' }}
         run: python scripts/etl_saude.py

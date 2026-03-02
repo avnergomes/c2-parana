@@ -1,10 +1,10 @@
 # .github/workflows/cron-legislativo.yml
-# Budget: ~0.5 min/dia (5 exec/semana × ~20s)
+# Budget: ~0.5 min/dia (5 exec/semana x ~20s)
 name: ETL Legislativo (ALEP)
 
 on:
   schedule:
-    - cron: '0 12 * * 1-5'   # Dias úteis às 12h UTC (9h BRT)
+    - cron: '0 14 * * 1-5'   # Dias uteis as 14h UTC (11h BRT) - ALEP funciona melhor em horario comercial
   workflow_dispatch:
 
 jobs:

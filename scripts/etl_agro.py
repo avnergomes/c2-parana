@@ -14,8 +14,12 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 
-def upsert_cache(supabase, cache_key: str, data: dict, source: str):
+def upsert_cache(supabase, cache_key: str, data, source: str):
     """Upsert no data_cache com timestamp atualizado."""
+    # Se data for lista, envolver em dict para JSONB compatibilidade
+    if isinstance(data, list):
+        data = {"items": data}
+
     supabase.table("data_cache").upsert({
         "cache_key": cache_key,
         "data": data,
@@ -25,12 +29,13 @@ def upsert_cache(supabase, cache_key: str, data: dict, source: str):
 
 
 def fetch_vbp_sidra():
-    """Busca VBP do IBGE SIDRA - Produção Agrícola Municipal."""
+    """Busca VBP do IBGE SIDRA - Producao Agricola Municipal."""
     try:
-        # Tabela 5457 - Produção Agrícola Municipal - Valor da produção
-        # n6 = municípios, v=214 = valor da produção, p=last 1 = último período
-        url = "https://apisidra.ibge.gov.br/values/t/5457/n6/all/v/214/p/last%201/c782/0"
-        resp = requests.get(url, timeout=60)
+        # Tabela 5457 - Producao Agricola Municipal - Valor da producao
+        # n3/41 = estado Parana (mais eficiente que n6/all que pega todos municipios do Brasil)
+        # v=214 = valor da producao, p=last 1 = ultimo periodo
+        url = "https://apisidra.ibge.gov.br/values/t/5457/n3/41/v/214/p/last%201/c782/0"
+        resp = requests.get(url, timeout=90)  # Timeout mais generoso
 
         if resp.status_code != 200:
             print(f"  SIDRA retornou {resp.status_code}, usando dados fallback")
@@ -283,39 +288,64 @@ def main():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     print("=== ETL Agro ===")
+    results = {}
 
     # VBP
     print("1/4 Buscando VBP SIDRA...")
-    vbp_kpis, vbp_municipios = fetch_vbp_sidra()
-    if vbp_kpis:
-        upsert_cache(supabase, "vbp_kpis_pr", vbp_kpis, "ibge_sidra")
-        print(f"  VBP Total: R$ {vbp_kpis['vbp_total_brl']:,.0f}")
-    if vbp_municipios:
-        upsert_cache(supabase, "vbp_municipios_pr", vbp_municipios, "ibge_sidra")
-        print(f"  {len(vbp_municipios)} municípios salvos")
+    try:
+        vbp_kpis, vbp_municipios = fetch_vbp_sidra()
+        if vbp_kpis:
+            upsert_cache(supabase, "vbp_kpis_pr", vbp_kpis, "ibge_sidra")
+            results["vbp"] = "OK"
+            print(f"  VBP Total: R$ {vbp_kpis['vbp_total_brl']:,.0f}")
+        if vbp_municipios:
+            upsert_cache(supabase, "vbp_municipios_pr", vbp_municipios, "ibge_sidra")
+            print(f"  {len(vbp_municipios)} municipios salvos")
+    except Exception as e:
+        print(f"  ERRO VBP: {e}")
+        results["vbp"] = f"ERRO: {e}"
 
     # ComexStat
     print("2/4 Buscando ComexStat MDIC...")
-    comex = fetch_comexstat()
-    if comex:
-        upsert_cache(supabase, "comex_kpis_pr", comex, "mdic_comexstat")
-        print(f"  Exportações: US$ {comex['exportacoes_usd']:,.0f}")
+    try:
+        comex = fetch_comexstat()
+        if comex:
+            upsert_cache(supabase, "comex_kpis_pr", comex, "mdic_comexstat")
+            results["comex"] = "OK"
+            print(f"  Exportacoes: US$ {comex['exportacoes_usd']:,.0f}")
+    except Exception as e:
+        print(f"  ERRO ComexStat: {e}")
+        results["comex"] = f"ERRO: {e}"
 
     # Emprego
     print("3/4 Buscando emprego agro...")
-    emprego = fetch_emprego_agro()
-    if emprego:
-        upsert_cache(supabase, "emprego_agro_pr", emprego, "ibge_cempre")
-        print(f"  Estoque: {emprego['estoque_atual']:,} pessoas")
+    try:
+        emprego = fetch_emprego_agro()
+        if emprego:
+            upsert_cache(supabase, "emprego_agro_pr", emprego, "ibge_cempre")
+            results["emprego"] = "OK"
+            print(f"  Estoque: {emprego['estoque_atual']:,} pessoas")
+    except Exception as e:
+        print(f"  ERRO emprego: {e}")
+        results["emprego"] = f"ERRO: {e}"
 
-    # Crédito Rural
-    print("4/4 Buscando crédito rural SICOR...")
-    credito = fetch_credito_rural()
-    if credito:
-        upsert_cache(supabase, "credito_rural_pr", credito, "bcb_sicor")
-        print(f"  Crédito: R$ {credito['total_ano_brl']:,.0f}")
+    # Credito Rural
+    print("4/4 Buscando credito rural SICOR...")
+    try:
+        credito = fetch_credito_rural()
+        if credito:
+            upsert_cache(supabase, "credito_rural_pr", credito, "bcb_sicor")
+            results["credito"] = "OK"
+            print(f"  Credito: R$ {credito['total_ano_brl']:,.0f}")
+    except Exception as e:
+        print(f"  ERRO SICOR: {e}")
+        results["credito"] = f"ERRO: {e}"
 
-    print("ETL Agro concluído!")
+    # Resumo
+    print("\n=== Resumo ETL Agro ===")
+    for k, v in results.items():
+        print(f"  {k}: {v}")
+    print("ETL Agro concluido!")
 
 
 if __name__ == "__main__":
