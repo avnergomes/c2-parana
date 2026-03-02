@@ -44,7 +44,9 @@ export function useVbpMunicipios() {
         .select('data, fetched_at')
         .eq('cache_key', 'vbp_municipios_pr')
         .single() as { data: DataCacheRow | null }
-      return (data?.data || []) as VbpMunicipio[]
+      // ETL pode envolver array em {"items": [...]} para compatibilidade JSONB
+      const cached = data?.data as { items?: VbpMunicipio[] } | VbpMunicipio[] | null
+      return Array.isArray(cached) ? cached : (cached?.items || [])
     },
     staleTime: 1000 * 60 * 60 * 24, // 24h
   })
