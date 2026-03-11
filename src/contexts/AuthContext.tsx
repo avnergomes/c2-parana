@@ -49,10 +49,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    // Timeout de segurança - nunca ficar travado mais de 5s
+    // Timeout de segurança - nunca ficar travado mais de 2s
     const timeout = setTimeout(() => {
-      if (loading) setLoading(false)
-    }, 5000)
+      if (loading) {
+        console.warn('Auth loading timeout - continuando sem sessão')
+        setLoading(false)
+      }
+    }, 2000)
 
     // Pegar sessão inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -63,26 +66,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setLoading(false)
       }
-    }).catch(() => setLoading(false))
+    }).catch((err) => {
+      console.warn('Auth getSession failed:', err)
+      setLoading(false)
+    })
 
     // Ouvir mudanças de auth
-    const { data: { subscription: authListener } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setSession(session)
-        setUser(session?.user ?? null)
+    let authListener: { unsubscribe: () => void } | null = null
+    try {
+      const { data } = supabase.auth.onAuthStateChange(
+        async (_event, session) => {
+          setSession(session)
+          setUser(session?.user ?? null)
 
-        if (session?.user) {
-          await fetchSubscription(session.user.id)
-        } else {
-          setSubscription(null)
+          if (session?.user) {
+            await fetchSubscription(session.user.id)
+          } else {
+            setSubscription(null)
+          }
+          setLoading(false)
         }
-        setLoading(false)
-      }
-    )
+      )
+      authListener = data.subscription
+    } catch (err) {
+      console.warn('Auth listener setup failed:', err)
+      setLoading(false)
+    }
 
     return () => {
       clearTimeout(timeout)
-      authListener.unsubscribe()
+      authListener?.unsubscribe()
     }
   }, [])
 
