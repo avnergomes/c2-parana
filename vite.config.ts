@@ -41,7 +41,7 @@ export default defineConfig(({ mode }) => ({
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://firms.modaps.eosdis.nasa.gov",
-        "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://apitempo.inmet.gov.br https://info.dengue.mat.br https://firms.modaps.eosdis.nasa.gov https://api.waqi.info https://servicodados.ibge.gov.br https://sima-precos.onrender.com https://*.ingest.sentry.io",
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://apitempo.inmet.gov.br https://info.dengue.mat.br https://firms.modaps.eosdis.nasa.gov https://api.waqi.info https://servicodados.ibge.gov.br https://precos-diarios-api.onrender.com https://*.ingest.sentry.io",
         "frame-src 'self' https://js.stripe.com",
         "object-src 'none'",
         "base-uri 'self'",

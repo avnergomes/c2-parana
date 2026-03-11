@@ -41,6 +41,8 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_PRECOS_API_URL: ${{ secrets.VITE_PRECOS_API_URL }}
+          VITE_PRECOS_API_KEY: ${{ secrets.VITE_PRECOS_API_KEY }}
         run: npm run build
 
       - name: Upload artifact para GitHub Pages
