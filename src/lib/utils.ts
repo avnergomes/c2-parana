@@ -57,3 +57,15 @@ export function slugify(text: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '')
 }
+
+/** Decode HTML entities and strip all HTML tags from a string */
+export function stripHtml(html: string): string {
+  if (!html) return ''
+  const textarea = document.createElement('textarea')
+  textarea.innerHTML = html
+  const decoded = textarea.value
+  return decoded
+    .replace(/<[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}

@@ -9,7 +9,8 @@ import type {
   CreditoRuralKpis,
 } from '@/types/agro'
 
-const PRECOS_API = import.meta.env.VITE_PRECOS_API_URL || 'https://sima-precos.onrender.com'
+const PRECOS_API = import.meta.env.VITE_PRECOS_API_URL || 'https://precos-diarios-api.onrender.com'
+const PRECOS_API_KEY = import.meta.env.VITE_PRECOS_API_KEY || ''
 
 // Type for data_cache table results
 interface DataCacheRow {
@@ -23,14 +24,19 @@ export function usePrecosDiarios(produto?: string) {
   return useQuery({
     queryKey: ['precos-diarios', produto],
     queryFn: async () => {
-      const url = produto
-        ? `${PRECOS_API}/precos?produto=${encodeURIComponent(produto)}&limit=30`
-        : `${PRECOS_API}/precos?limit=50`
-      const res = await fetch(url)
+      const headers: Record<string, string> = {}
+      if (PRECOS_API_KEY) headers['X-API-Key'] = PRECOS_API_KEY
+
+      const params = new URLSearchParams({ limit: '30' })
+      if (produto) params.set('product', produto)
+
+      const res = await fetch(`${PRECOS_API}/api/v1/prices/latest?${params}`, { headers })
       if (!res.ok) throw new Error('Falha ao buscar preços SIMA')
-      return res.json()
+      const json = await res.json()
+      return json.prices ?? json.data ?? json
     },
     staleTime: 1000 * 60 * 60, // 1h
+    enabled: !!PRECOS_API_KEY,
   })
 }
 

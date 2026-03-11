@@ -92,6 +92,15 @@ export interface CreditoRural {
   finalidade?: string
 }
 
-export const PRODUTOS_DESTAQUE = [
-  'SOJA', 'MILHO', 'TRIGO', 'CANA-DE-AÇÚCAR', 'FRANGO', 'SUÍNO', 'CAFÉ'
-]
+/** Map: label curto → nome exato na API SIMA */
+export const PRODUTOS_DESTAQUE_MAP: Record<string, string> = {
+  'SOJA': 'Soja industrial tipo 1',
+  'MILHO': 'Milho amarelo tipo 1',
+  'TRIGO': 'Trigo pão',
+  'FRANGO': 'Frango de corte',
+  'SUÍNO': 'Suíno vivo',
+  'CAFÉ': 'Café em coco',
+  'BOI': 'Boi em pé',
+}
+
+export const PRODUTOS_DESTAQUE = Object.keys(PRODUTOS_DESTAQUE_MAP)

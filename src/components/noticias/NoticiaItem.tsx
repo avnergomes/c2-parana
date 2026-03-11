@@ -2,7 +2,7 @@
 import type { NoticiaItem } from '@/types/noticias'
 import { SOURCE_CONFIG, URGENCY_CONFIG } from '@/types/noticias'
 import { timeAgo } from '@/lib/utils'
-import { cn } from '@/lib/utils'
+import { cn, stripHtml } from '@/lib/utils'
 
 interface NoticiaItemProps {
   item: NoticiaItem
@@ -62,7 +62,7 @@ export function NoticiaCard({ item, compact = false }: NoticiaItemProps) {
           {/* Descrição (strip HTML tags do RSS) */}
           {!compact && item.description && (
             <p className="text-xs text-text-secondary mt-1 line-clamp-2">
-              {item.description.replace(/<[^>]*>/g, '').replace(/&[a-z]+;/gi, ' ').trim()}
+              {stripHtml(item.description)}
             </p>
           )}
 
