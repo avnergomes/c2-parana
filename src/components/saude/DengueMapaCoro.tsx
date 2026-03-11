@@ -33,13 +33,15 @@ export function DengueMapaCoro() {
     return map
   }, [dengueData])
 
+  const ALERT_COLORS = ['#10b981', '#f59e0b', '#f97316', '#ef4444']
+
   const getStyle = (feature?: Feature) => {
-    const props = feature?.properties as { CD_MUN?: string; geocodigo?: string; codarea?: string } | undefined
+    const props = feature?.properties as Record<string, string> | undefined
     const ibge = String(props?.CD_MUN || props?.codarea || props?.geocodigo || '')
-    const level = dengueMap.get(ibge) ?? 0
-    const config = DENGUE_ALERT_CONFIG[level as keyof typeof DENGUE_ALERT_CONFIG] ?? DENGUE_ALERT_CONFIG[0]
+    const raw = dengueMap.get(ibge)
+    const level = (typeof raw === 'number' && raw >= 0 && raw <= 3) ? raw : 0
     return {
-      fillColor: config.color,
+      fillColor: ALERT_COLORS[level],
       fillOpacity: 0.55,
       color: '#374151',
       weight: 0.6,
