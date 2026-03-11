@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""ETL Legislativo: ALEP projetos de lei, sessoes e votacoes - com retry."""
+"""ETL Legislativo: ALEP projetos de lei via API de Dados Abertos - com retry."""
 
 import os
+import sys
 import time
 import requests
 from datetime import datetime, timezone
@@ -13,55 +14,123 @@ load_dotenv()
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
-# Tentar HTTPS primeiro, fallback para HTTP
-ALEP_BASES = [
-    "https://webservices.assembleia.pr.leg.br/api/public",
-    "http://webservices.assembleia.pr.leg.br/api/public",
-]
+# API de Dados Abertos da ALEP
+# Docs: https://transparencia.assembleia.pr.leg.br/servicos/dados-abertos
+# HTTPS tem problema de certificado (TLS ALT_NAME_INVALID), usar HTTP
+ALEP_BASE = "http://webservices.assembleia.pr.leg.br/api/public"
+
+HEADERS = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+}
 
 
-def fetch_alep_endpoint(path: str, params: dict = {}, max_retries: int = 3) -> list:
-    """Busca dados de um endpoint da ALEP API com retry."""
+def _request_with_retry(method: str, url: str, max_retries: int = 3, **kwargs) -> dict | list | None:
+    """HTTP request with exponential backoff retry."""
+    for attempt in range(max_retries):
+        try:
+            resp = requests.request(method, url, timeout=30, headers=HEADERS, **kwargs)
 
-    for base in ALEP_BASES:
-        url = f"{base}/{path}"
+            if resp.status_code == 200:
+                return resp.json()
 
-        for attempt in range(max_retries):
-            try:
-                resp = requests.get(url, params=params, timeout=30,
-                                    headers={"Accept": "application/json"})
+            if resp.status_code in (429, 500, 502, 503, 504):
+                wait = 2 ** attempt
+                print(f"  ALEP {url}: HTTP {resp.status_code}, tentativa {attempt+1}/{max_retries}. Aguardando {wait}s...")
+                time.sleep(wait)
+                continue
 
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data, list):
-                        return data
-                    # Tentar extrair de diferentes formatos de resposta
-                    if isinstance(data, dict):
-                        return data.get("items", data.get("data", data.get("results", [])))
-                    return []
+            print(f"  ALEP {url}: HTTP {resp.status_code}")
+            return None
 
-                if resp.status_code in (500, 502, 503, 504):
-                    wait = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-                    print(f"  ALEP {path}: HTTP {resp.status_code}, tentativa {attempt+1}/{max_retries}. Aguardando {wait}s...")
-                    time.sleep(wait)
-                    continue
+        except requests.exceptions.ConnectionError:
+            print(f"  ALEP: Conexao recusada, tentativa {attempt+1}/{max_retries}")
+            time.sleep(2)
+        except requests.exceptions.Timeout:
+            print(f"  ALEP: Timeout, tentativa {attempt+1}/{max_retries}")
+            time.sleep(1)
+        except Exception as e:
+            print(f"  ALEP: Erro inesperado: {e}")
+            return None
 
-                # 404 ou outro erro -> nao retry
-                print(f"  ALEP {path}: HTTP {resp.status_code}")
-                return []
+    print(f"  ALEP {url}: Todas as {max_retries} tentativas falharam")
+    return None
 
-            except requests.exceptions.ConnectionError as e:
-                print(f"  ALEP {path}: Conexao recusada ({base}), tentativa {attempt+1}/{max_retries}")
-                time.sleep(2)
-            except requests.exceptions.Timeout:
-                print(f"  ALEP {path}: Timeout, tentativa {attempt+1}/{max_retries}")
-                time.sleep(1)
-            except Exception as e:
-                print(f"  ALEP {path}: Erro inesperado: {e}")
-                return []
 
-    print(f"  ALEP {path}: Todas as tentativas falharam")
+def fetch_proposicoes(year: int, limit: int = 30) -> list[dict]:
+    """Busca proposicoes via POST /proposicao/filtrar."""
+    url = f"{ALEP_BASE}/proposicao/filtrar"
+    body = {
+        "ano": year,
+        "numeroMaximoRegistro": limit,
+    }
+    data = _request_with_retry("POST", url, json=body)
+    if data is None:
+        return []
+    if isinstance(data, dict):
+        if not data.get("sucesso", True):
+            print(f"  ALEP proposicao/filtrar: API retornou sucesso=false")
+            return []
+        return data.get("lista", [])
+    if isinstance(data, list):
+        return data
     return []
+
+
+def fetch_proposicao_detail(codigo: int) -> dict | None:
+    """Busca detalhes de uma proposicao via GET /proposicao/{codigo}."""
+    url = f"{ALEP_BASE}/proposicao/{codigo}"
+    data = _request_with_retry("GET", url)
+    if data is None:
+        return None
+    if isinstance(data, dict):
+        return data.get("valor", data)
+    return None
+
+
+def build_proposicao_item(pl: dict, detail: dict | None, year: int) -> dict:
+    """Converte uma proposicao da ALEP para o formato do Supabase."""
+    codigo = pl.get("codigo")
+    numero = pl.get("numero", "")
+    tipo = pl.get("siglaTipoProposicao") or pl.get("tipoProposicao") or "PL"
+
+    # Usar ementa do detalhe se disponivel, senao do resumo
+    ementa = None
+    if detail:
+        ementa = detail.get("ementa") or detail.get("assunto")
+    if not ementa:
+        ementa = pl.get("assunto") or pl.get("tipoProposicao") or f"{tipo} {numero}/{year}"
+
+    autor = None
+    if detail:
+        autor = detail.get("autor")
+    if not autor:
+        autor = pl.get("autor")
+
+    status = pl.get("status")
+    if detail and not status:
+        status = detail.get("status") or detail.get("situacaoProcesso")
+
+    published_at = None
+    if detail:
+        published_at = detail.get("dataEntrada") or detail.get("dataRecebimento")
+    if not published_at:
+        published_at = datetime.now(timezone.utc).isoformat()
+
+    portal_url = f"https://www.assembleia.pr.leg.br/pesquisa-legislativa/proposicao?idProposicao={codigo}" if codigo else f"https://www.assembleia.pr.leg.br/"
+
+    return {
+        "external_id": f"alep-pl-{codigo or numero}-{year}",
+        "type": "projeto_lei",
+        "number": str(numero),
+        "year": year,
+        "title": ementa,
+        "description": detail.get("observacao") if detail else None,
+        "author": autor,
+        "status": status,
+        "url": portal_url,
+        "published_at": published_at,
+    }
 
 
 def main():
@@ -70,55 +139,38 @@ def main():
     items = []
     year = datetime.now().year
 
+    # === Verificar conectividade com API ===
+    print("Verificando API ALEP...")
+    campos = _request_with_retry("GET", f"{ALEP_BASE}/proposicao/campos", max_retries=2)
+    if campos is None:
+        print("AVISO: API da ALEP (webservices.assembleia.pr.leg.br) esta indisponivel.")
+        print("A API pode estar em manutencao. Nenhum dado legislativo sera atualizado nesta execucao.")
+        print("Docs: https://transparencia.assembleia.pr.leg.br/servicos/dados-abertos")
+        print("ETL Legislativo concluido (sem dados novos).")
+        sys.exit(0)
+
+    print("  API ALEP acessivel.")
+
     # === Projetos de lei recentes ===
-    print("1/2 Buscando projetos de lei ALEP...")
+    print("1/1 Buscando projetos de lei ALEP...")
     try:
-        pls = fetch_alep_endpoint("proposicoes", {"ano": year, "limit": 30, "tipo": "PL"})
+        pls = fetch_proposicoes(year, limit=30)
         print(f"  Encontrados: {len(pls)} projetos")
 
         for pl in pls:
             try:
-                items.append({
-                    "external_id": f"alep-pl-{pl.get('id') or pl.get('numero')}-{year}",
-                    "type": "projeto_lei",
-                    "number": str(pl.get("numero", "")),
-                    "year": year,
-                    "title": pl.get("ementa") or pl.get("titulo") or f"PL {pl.get('numero')}/{year}",
-                    "description": pl.get("descricao"),
-                    "author": pl.get("autor") or pl.get("autores"),
-                    "status": pl.get("situacao") or pl.get("status"),
-                    "url": pl.get("link") or pl.get("url") or f"https://assembleia.pr.leg.br/busca?q=PL+{pl.get('numero')}",
-                    "published_at": pl.get("dataApresentacao") or pl.get("data") or datetime.now(timezone.utc).isoformat(),
-                })
+                codigo = pl.get("codigo")
+                detail = None
+                if codigo:
+                    detail = fetch_proposicao_detail(codigo)
+                    # Rate limit: pequena pausa entre requests de detalhe
+                    time.sleep(0.3)
+
+                items.append(build_proposicao_item(pl, detail, year))
             except Exception as e:
                 print(f"  Erro ao processar PL: {e}")
     except Exception as e:
         print(f"  ERRO na busca de PLs: {e}")
-
-    # === Sessoes recentes ===
-    print("2/2 Buscando sessoes ALEP...")
-    try:
-        sessoes = fetch_alep_endpoint("sessoes", {"limit": 10})
-        print(f"  Encontradas: {len(sessoes)} sessoes")
-
-        for s in sessoes:
-            try:
-                items.append({
-                    "external_id": f"alep-sessao-{s.get('id') or s.get('numero')}-{year}",
-                    "type": "sessao",
-                    "number": str(s.get("numero", "")),
-                    "year": year,
-                    "title": s.get("tipo") or s.get("descricao") or "Sessao Plenaria",
-                    "description": s.get("pauta"),
-                    "author": None,
-                    "status": s.get("situacao") or s.get("status"),
-                    "url": s.get("link") or "https://assembleia.pr.leg.br/plenario/sessao",
-                    "published_at": s.get("data") or datetime.now(timezone.utc).isoformat(),
-                })
-            except Exception as e:
-                print(f"  Erro ao processar sessao: {e}")
-    except Exception as e:
-        print(f"  ERRO na busca de sessoes: {e}")
 
     # === Salvar no Supabase ===
     if items:
@@ -138,12 +190,12 @@ def main():
                         [item], on_conflict="external_id"
                     ).execute()
                     saved += 1
-                except:
+                except Exception:
                     pass
             print(f"  Salvos individualmente: {saved}/{len(items)}")
     else:
-        print("Nenhum item legislativo encontrado (API ALEP pode estar instavel)")
-        # NAO sair com exit code 1 - a API simplesmente pode estar fora
+        print("Nenhum item legislativo encontrado.")
+        print("Possivel causa: API retornou lista vazia para o ano corrente.")
 
     print("ETL Legislativo concluido!")
 

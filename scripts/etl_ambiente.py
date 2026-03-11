@@ -23,9 +23,17 @@ PR_BBOX = "-54,-26.7,-48.0,-22.5"
 CIDADES_AR = [
     {"id": "curitiba", "slug": "curitiba"},
     {"id": "londrina", "slug": "londrina"},
-    {"id": "maringa", "slug": "maringa"},
-    {"id": "foz", "slug": "foz-do-iguacu"},
+    {"id": "maringa", "slug": "maringá"},
+    {"id": "foz", "slug": "foz-do-iguaçu"},
 ]
+
+# Fallback: WAQI station IDs by geo coordinates (lat, lon)
+CIDADES_AR_GEO = {
+    "curitiba": {"lat": -25.43, "lon": -49.27},
+    "londrina": {"lat": -23.31, "lon": -51.16},
+    "maringa": {"lat": -23.42, "lon": -51.94},
+    "foz": {"lat": -25.52, "lon": -54.59},
+}
 
 def fetch_firms():
     """Busca focos de calor VIIRS SNPP do NASA FIRMS."""
@@ -65,35 +73,64 @@ def fetch_firms():
         print(f"Erro FIRMS: {e}")
         return []
 
+def _parse_aqicn_data(city_id, data):
+    """Extrai registro de qualidade do ar a partir da resposta WAQI."""
+    d = data["data"]
+    iaqi = d.get("iaqi", {})
+    return {
+        "city": city_id,
+        "station_name": d.get("city", {}).get("name"),
+        "aqi": int(d.get("aqi", 0)) if d.get("aqi") != "-" else None,
+        "dominant_pollutant": d.get("dominentpol"),
+        "pm25": float(iaqi.get("pm25", {}).get("v", 0)) if iaqi.get("pm25") else None,
+        "pm10": float(iaqi.get("pm10", {}).get("v", 0)) if iaqi.get("pm10") else None,
+        "o3": float(iaqi.get("o3", {}).get("v", 0)) if iaqi.get("o3") else None,
+        "no2": float(iaqi.get("no2", {}).get("v", 0)) if iaqi.get("no2") else None,
+        "co": float(iaqi.get("co", {}).get("v", 0)) if iaqi.get("co") else None,
+        "observed_at": d.get("time", {}).get("iso") or datetime.now().isoformat(),
+    }
+
+
+def _try_aqicn_feed(feed_path, token):
+    """Tenta buscar dados WAQI por feed path. Retorna (data_dict, None) ou (None, erro_msg)."""
+    url = f"https://api.waqi.info/feed/{feed_path}/?token={token}"
+    resp = requests.get(url, timeout=15)
+    data = resp.json()
+    status = data.get("status")
+    if status != "ok":
+        msg = data.get("data") or data.get("message") or "unknown"
+        return None, f"status={status} msg={msg}"
+    return data, None
+
+
 def fetch_aqicn():
     """Busca qualidade do ar AQICN para cidades PR."""
     records = []
     for city in CIDADES_AR:
-        url = f"https://api.waqi.info/feed/{city['slug']}/?token={WAQI_TOKEN}"
+        city_id = city["id"]
+        slug = city["slug"]
         try:
-            resp = requests.get(url, timeout=15)
-            data = resp.json()
+            # Tentativa 1: busca por nome da cidade
+            data, err = _try_aqicn_feed(slug, WAQI_TOKEN)
+            if data is None:
+                print(f"  AQICN {city_id}: feed/{slug} falhou ({err}), tentando geo...")
+                # Tentativa 2: busca por coordenada geográfica
+                geo = CIDADES_AR_GEO.get(city_id)
+                if geo:
+                    geo_path = f"geo:{geo['lat']};{geo['lon']}"
+                    data, err2 = _try_aqicn_feed(geo_path, WAQI_TOKEN)
+                    if data is None:
+                        print(f"  AQICN {city_id}: feed/{geo_path} também falhou ({err2}), pulando")
+                        continue
+                    print(f"  AQICN {city_id}: sucesso via geo fallback")
+                else:
+                    print(f"  AQICN {city_id}: sem coordenadas de fallback, pulando")
+                    continue
 
-            if data.get("status") != "ok":
-                continue
-
-            d = data["data"]
-            iaqi = d.get("iaqi", {})
-
-            records.append({
-                "city": city["id"],
-                "station_name": d.get("city", {}).get("name"),
-                "aqi": int(d.get("aqi", 0)) if d.get("aqi") != "-" else None,
-                "dominant_pollutant": d.get("dominentpol"),
-                "pm25": float(iaqi.get("pm25", {}).get("v", 0)) if iaqi.get("pm25") else None,
-                "pm10": float(iaqi.get("pm10", {}).get("v", 0)) if iaqi.get("pm10") else None,
-                "o3": float(iaqi.get("o3", {}).get("v", 0)) if iaqi.get("o3") else None,
-                "no2": float(iaqi.get("no2", {}).get("v", 0)) if iaqi.get("no2") else None,
-                "co": float(iaqi.get("co", {}).get("v", 0)) if iaqi.get("co") else None,
-                "observed_at": d.get("time", {}).get("iso") or datetime.now().isoformat(),
-            })
+            records.append(_parse_aqicn_data(city_id, data))
+            print(f"  AQICN {city_id}: AQI={records[-1].get('aqi')}")
         except Exception as e:
-            print(f"  Erro AQICN {city['id']}: {e}")
+            print(f"  Erro AQICN {city_id}: {e}")
 
     print(f"AQICN: {len(records)} cidades coletadas")
     return records
