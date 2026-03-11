@@ -34,8 +34,8 @@ export function DengueMapaCoro() {
   }, [dengueData])
 
   const getStyle = (feature?: Feature) => {
-    const props = feature?.properties as { CD_MUN?: string; geocodigo?: string } | undefined
-    const ibge = String(props?.CD_MUN || props?.geocodigo || '')
+    const props = feature?.properties as { CD_MUN?: string; geocodigo?: string; codarea?: string } | undefined
+    const ibge = String(props?.CD_MUN || props?.codarea || props?.geocodigo || '')
     const level = dengueMap.get(ibge) || 0
     const config = DENGUE_ALERT_CONFIG[level as keyof typeof DENGUE_ALERT_CONFIG]
     return {
