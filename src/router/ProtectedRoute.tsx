@@ -8,8 +8,8 @@ interface ProtectedRouteProps {
   requirePro?: boolean
 }
 
-export function ProtectedRoute({ children, requirePro: _requirePro = false }: ProtectedRouteProps) {
-  const { loading, user } = useAuth()
+export function ProtectedRoute({ children, requirePro = false }: ProtectedRouteProps) {
+  const { loading, user, hasAccess, isPro } = useAuth()
   const location = useLocation()
 
   if (loading) return <LoadingScreen />
@@ -18,13 +18,13 @@ export function ProtectedRoute({ children, requirePro: _requirePro = false }: Pr
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
-  // TODO: Reativar paywall quando sistema estiver funcional
-  // if (!hasAccess) {
-  //   return <Navigate to="/pricing" state={{ from: location, expired: true }} replace />
-  // }
-  // if (requirePro && !isPro) {
-  //   return <Navigate to="/pricing" state={{ from: location, upgrade: true }} replace />
-  // }
+  if (!hasAccess) {
+    return <Navigate to="/pricing" state={{ from: location, expired: true }} replace />
+  }
+
+  if (requirePro && !isPro) {
+    return <Navigate to="/pricing" state={{ from: location, upgrade: true }} replace />
+  }
 
   return <>{children}</>
 }

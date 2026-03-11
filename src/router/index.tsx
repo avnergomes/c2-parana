@@ -11,6 +11,7 @@ import { ResetPasswordPage } from '@/pages/ResetPassword'
 import { PricingPage } from '@/pages/PricingPage'
 import { CheckoutSuccessPage } from '@/pages/CheckoutSuccess'
 import { CheckoutCancelPage } from '@/pages/CheckoutCancel'
+import { AuthCallbackPage } from '@/pages/AuthCallback'
 
 // Lazy load dos módulos
 const DashboardPage = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.DashboardPage })))
@@ -31,6 +32,7 @@ export function AppRouter() {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
         <Route path="/checkout/cancel" element={<CheckoutCancelPage />} />

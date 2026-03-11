@@ -24,6 +24,9 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Unit tests
+        run: npx vitest run --reporter=verbose
+
       - name: Build check
         env:
           VITE_SUPABASE_URL: https://placeholder.supabase.co

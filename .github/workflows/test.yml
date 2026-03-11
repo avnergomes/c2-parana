@@ -28,8 +28,8 @@ jobs:
 
       - name: Run E2E tests
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://placeholder.supabase.co' }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJplaceholder' }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL != '' && secrets.VITE_SUPABASE_URL || 'https://placeholder.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY != '' && secrets.VITE_SUPABASE_ANON_KEY || 'eyJplaceholder' }}
           VITE_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder
           VITE_WAQI_TOKEN: demo
           VITE_NASA_FIRMS_KEY: DEMO_KEY
