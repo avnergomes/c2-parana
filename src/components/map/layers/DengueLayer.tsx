@@ -40,9 +40,9 @@ export function DengueLayer() {
       style={(feature: Feature | undefined) => {
         const ibge = feature?.properties?.CD_MUN || feature?.properties?.codarea || feature?.properties?.geocodigo
         const dengue = dengueMap[ibge]
-        const level = dengue?.alert_level || 0
+        const level = dengue?.alert_level ?? 0
         return {
-          fillColor: DENGUE_COLORS[level],
+          fillColor: DENGUE_COLORS[level] ?? DENGUE_COLORS[0],
           fillOpacity: 0.5,
           color: 'transparent',
           weight: 0,
