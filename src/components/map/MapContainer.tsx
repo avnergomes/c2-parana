@@ -32,7 +32,8 @@ export function MapModule() {
   const { data: geoJSON } = useQuery({
     queryKey: ['municipios-geojson'],
     queryFn: async () => {
-      const res = await fetch('/data/municipios-pr.geojson')
+      const base = import.meta.env.BASE_URL || '/'
+      const res = await fetch(`${base}data/municipios-pr.geojson`)
       if (!res.ok) {
         // Fallback: IBGE direto
         const ibgeRes = await fetch('https://servicodados.ibge.gov.br/api/v2/malhas/41/?resolucao=5&formato=application/vnd.geo+json')

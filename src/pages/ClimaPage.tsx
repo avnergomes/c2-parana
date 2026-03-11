@@ -101,6 +101,11 @@ export function ClimaPage() {
               </div>
             ))}
           </div>
+        ) : principaisEstacoes.length === 0 ? (
+          <div className="card p-8 text-center text-text-secondary">
+            <p className="text-lg mb-2">Sem dados meteorológicos no momento</p>
+            <p className="text-xs text-text-muted">A API do INMET pode estar temporariamente indisponível. O ETL tenta novamente a cada 30 minutos.</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {principaisEstacoes.map(estacao => (

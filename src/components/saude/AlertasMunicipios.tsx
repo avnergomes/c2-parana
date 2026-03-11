@@ -34,9 +34,9 @@ export function AlertasMunicipios() {
             key={level}
             onClick={() => setFilter(level)}
             className={`text-xs px-3 py-1 rounded-full border transition-all ${filter === level ? 'border-current bg-current/10' : 'border-border text-text-secondary'}`}
-            style={{ color: filter === level ? DENGUE_ALERT_CONFIG[level as keyof typeof DENGUE_ALERT_CONFIG].color : undefined }}
+            style={{ color: filter === level ? (DENGUE_ALERT_CONFIG[level as keyof typeof DENGUE_ALERT_CONFIG] || DENGUE_ALERT_CONFIG[0]).color : undefined }}
           >
-            {DENGUE_ALERT_CONFIG[level as keyof typeof DENGUE_ALERT_CONFIG].label} ({alertaCountByLevel[level] || 0})
+            {(DENGUE_ALERT_CONFIG[level as keyof typeof DENGUE_ALERT_CONFIG] || DENGUE_ALERT_CONFIG[0]).label} ({alertaCountByLevel[level] || 0})
           </button>
         ))}
       </div>
@@ -61,7 +61,7 @@ export function AlertasMunicipios() {
               ))
             ) : (
               sorted.slice(0, 50).map(d => {
-                const config = DENGUE_ALERT_CONFIG[d.alert_level as keyof typeof DENGUE_ALERT_CONFIG]
+                const config = DENGUE_ALERT_CONFIG[d.alert_level as keyof typeof DENGUE_ALERT_CONFIG] || DENGUE_ALERT_CONFIG[0]
                 return (
                   <tr key={d.id} className="border-b border-border/50 hover:bg-background-elevated transition-colors">
                     <td className="py-2 px-4 text-text-primary text-xs">{d.municipality_name || d.ibge_code}</td>
