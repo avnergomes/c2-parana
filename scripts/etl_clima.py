@@ -30,9 +30,10 @@ PR_STATIONS = {
 
 def fetch_station_data(station_code: str, date_ini: str, date_fim: str) -> list:
     """Busca dados de uma estação INMET."""
-    url = f"https://apitempo.inmet.gov.br/estacao/dados/{station_code}/{date_ini}/{date_fim}"
+    url = f"https://apitempo.inmet.gov.br/estacao/{date_ini}/{date_fim}/{station_code}"
+    headers = {"User-Agent": "c2-parana/1.0 (ETL Clima)"}
     try:
-        response = requests.get(url, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
         print(f"    HTTP {response.status_code} | Content-Length: {len(response.content)} bytes")
 
         # INMET às vezes retorna HTML em vez de JSON (manutenção)
