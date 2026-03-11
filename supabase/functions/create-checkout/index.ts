@@ -38,6 +38,13 @@ serve(async (req) => {
       })
     }
 
+    // Validar plano antes de tudo
+    if (!['solo', 'pro'].includes(plan)) {
+      return new Response(JSON.stringify({ error: 'Plano invalido. Use "solo" ou "pro".' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
     const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
       apiVersion: '2024-06-20',
     })
@@ -54,12 +61,6 @@ serve(async (req) => {
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-    }
-
-    if (!['solo', 'pro'].includes(plan)) {
-      return new Response(JSON.stringify({ error: 'Plano invalido. Use "solo" ou "pro".' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
     }
 
     // Verificar se já tem customer Stripe

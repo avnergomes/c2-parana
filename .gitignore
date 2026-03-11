@@ -21,6 +21,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+anon-key.txt
 
 # Logs
 npm-debug.log*

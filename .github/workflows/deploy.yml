@@ -29,13 +29,17 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npx vitest run
+
       - name: Build Vite
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VITE_STRIPE_PUBLISHABLE_KEY }}
-          VITE_WAQI_TOKEN: ${{ secrets.VITE_WAQI_TOKEN }}
-          VITE_NASA_FIRMS_KEY: ${{ secrets.VITE_NASA_FIRMS_KEY }}
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
         run: npm run build
 
