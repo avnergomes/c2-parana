@@ -38,11 +38,13 @@ export function DengueLayer() {
       key="dengue-layer"
       data={municipiosGeoJSON}
       style={(feature: Feature | undefined) => {
-        const ibge = feature?.properties?.CD_MUN || feature?.properties?.codarea || feature?.properties?.geocodigo
+        const p = feature?.properties
+        const ibge = p?.CD_MUN || p?.codarea || p?.geocodigo
         const dengue = dengueMap[ibge]
-        const level = dengue?.alert_level ?? 0
+        const raw = dengue?.alert_level
+        const level = (typeof raw === 'number' && raw >= 0 && raw <= 3) ? raw : 0
         return {
-          fillColor: DENGUE_COLORS[level] ?? DENGUE_COLORS[0],
+          fillColor: DENGUE_COLORS[level],
           fillOpacity: 0.5,
           color: 'transparent',
           weight: 0,
