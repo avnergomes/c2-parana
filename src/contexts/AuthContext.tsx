@@ -113,12 +113,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return status as AuthContextType['accessStatus']
   }, [subscription, loading])
 
-  // TEMPORÁRIO: Acesso livre para todos os usuários logados (paywall desativado)
-  // TODO: Reativar quando sistema estiver funcional:
+  // TEMPORÁRIO: Acesso livre total para testes (auth + paywall desativados)
+  // TODO: Reativar quando auth e Stripe estiverem configurados:
   // const hasAccess = accessStatus === 'trialing' || accessStatus === 'active'
   // const isPro = hasAccess && (subscription?.plan === 'pro' || subscription?.plan === 'enterprise')
-  const hasAccess = !!user
-  const isPro = !!user
+  const hasAccess = true
+  const isPro = true
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
