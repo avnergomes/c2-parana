@@ -10,7 +10,7 @@ import type {
 } from '@/types/agro'
 
 const PRECOS_API = import.meta.env.VITE_PRECOS_API_URL || 'https://precos-diarios-api.onrender.com'
-const PRECOS_API_KEY = import.meta.env.VITE_PRECOS_API_KEY || ''
+const PRECOS_API_KEY = import.meta.env.VITE_PRECOS_API_KEY || 'demo-key-free'
 
 // Type for data_cache table results
 interface DataCacheRow {
