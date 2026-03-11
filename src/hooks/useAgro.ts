@@ -36,7 +36,6 @@ export function usePrecosDiarios(produto?: string) {
       return json.prices ?? json.data ?? json
     },
     staleTime: 1000 * 60 * 60, // 1h
-    enabled: !!PRECOS_API_KEY,
   })
 }
 
