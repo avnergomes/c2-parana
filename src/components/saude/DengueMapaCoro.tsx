@@ -16,7 +16,8 @@ export function DengueMapaCoro() {
   const { data: geoJSON } = useQuery({
     queryKey: ['municipios-geojson-saude'],
     queryFn: async () => {
-      const res = await fetch('/data/municipios-pr.geojson')
+      const base = import.meta.env.BASE_URL || '/'
+      const res = await fetch(`${base}data/municipios-pr.geojson`)
       if (!res.ok) {
         const r2 = await fetch('https://servicodados.ibge.gov.br/api/v2/malhas/41/?resolucao=5&formato=application/vnd.geo+json')
         return r2.json()
