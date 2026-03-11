@@ -65,7 +65,8 @@ export function stripHtml(html: string): string {
   textarea.innerHTML = html
   const decoded = textarea.value
   return decoded
-    .replace(/<[^>]*>/g, '')
+    .replace(/<[^>]*>/g, '')       // complete tags: <tag attr="val">
+    .replace(/<\/?[a-z][^>]*$/gi, '') // truncated tags at end of string: <a href="...
     .replace(/\s+/g, ' ')
     .trim()
 }
