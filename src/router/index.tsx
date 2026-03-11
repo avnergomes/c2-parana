@@ -2,7 +2,8 @@
 import { lazy } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from '@/contexts/AuthContext'
-import { ProtectedRoute } from './ProtectedRoute'
+// TODO: Reativar ProtectedRoute quando auth estiver configurado
+// import { ProtectedRoute } from './ProtectedRoute'
 import { Layout } from '@/components/layout/Layout'
 import { LoginPage } from '@/pages/Login'
 import { RegisterPage } from '@/pages/Register'
@@ -37,8 +38,8 @@ export function AppRouter() {
         <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
         <Route path="/checkout/cancel" element={<CheckoutCancelPage />} />
 
-        {/* Rotas protegidas com Layout */}
-        <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+        {/* Rotas com Layout (auth desabilitado temporariamente para testes) */}
+        <Route element={<Layout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/mapa" element={<MapPage />} />
           <Route path="/clima" element={<ClimaPage />} />
