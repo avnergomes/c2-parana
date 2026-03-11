@@ -38,7 +38,7 @@ export function DengueLayer() {
       key="dengue-layer"
       data={municipiosGeoJSON}
       style={(feature: Feature | undefined) => {
-        const ibge = feature?.properties?.CD_MUN || feature?.properties?.geocodigo
+        const ibge = feature?.properties?.CD_MUN || feature?.properties?.codarea || feature?.properties?.geocodigo
         const dengue = dengueMap[ibge]
         const level = dengue?.alert_level || 0
         return {

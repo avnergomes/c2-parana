@@ -48,7 +48,7 @@ export function MapModule() {
     layer.on({
       click: () => {
         const props = feature.properties
-        const ibge = props?.CD_MUN || props?.geocodigo || props?.code
+        const ibge = props?.CD_MUN || props?.codarea || props?.geocodigo || props?.code
         const name = props?.NM_MUN || props?.nome || 'Município'
         setSelectedFeature({ ibge: String(ibge), name })
         selectMunicipality(String(ibge))
