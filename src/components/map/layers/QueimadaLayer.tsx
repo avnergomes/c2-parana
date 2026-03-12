@@ -9,6 +9,23 @@ interface FireSpot {
   brightness: number | null
   acq_date: string | null
   municipality: string | null
+  satellite: string | null
+  confidence: string | null
+}
+
+function brightnessToRadius(brightness: number | null): number {
+  if (!brightness) return 4
+  if (brightness > 400) return 7
+  if (brightness > 350) return 6
+  if (brightness > 300) return 5
+  return 4
+}
+
+function brightnessToOpacity(brightness: number | null): number {
+  if (!brightness) return 0.6
+  if (brightness > 400) return 0.95
+  if (brightness > 350) return 0.85
+  return 0.7
 }
 
 export function QueimadaLayer() {
@@ -18,7 +35,7 @@ export function QueimadaLayer() {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
       const { data } = await supabase
         .from('fire_spots')
-        .select('latitude, longitude, brightness, acq_date, municipality')
+        .select('latitude, longitude, brightness, acq_date, municipality, satellite, confidence')
         .gte('acq_date', sevenDaysAgo)
         .limit(2000)
       return (data || []) as FireSpot[]
@@ -28,27 +45,54 @@ export function QueimadaLayer() {
 
   return (
     <>
-      {fires?.map((fire, i) => (
-        <CircleMarker
-          key={`fire-${i}`}
-          center={[fire.latitude, fire.longitude]}
-          radius={4}
-          pathOptions={{
-            fillColor: '#ef4444',
-            fillOpacity: 0.8,
-            color: '#dc2626',
-            weight: 1,
-          }}
-        >
-          <Tooltip>
-            <div className="text-xs">
-              <p className="font-semibold">{fire.municipality || 'Foco de calor'}</p>
-              <p>Brilho: {fire.brightness?.toFixed(0)}K</p>
-              <p>{fire.acq_date}</p>
-            </div>
-          </Tooltip>
-        </CircleMarker>
-      ))}
+      {fires?.map((fire, i) => {
+        const radius = brightnessToRadius(fire.brightness)
+        const opacity = brightnessToOpacity(fire.brightness)
+
+        return (
+          <CircleMarker
+            key={`fire-${i}`}
+            center={[fire.latitude, fire.longitude]}
+            radius={radius}
+            pathOptions={{
+              fillColor: '#ef4444',
+              fillOpacity: opacity,
+              color: '#fbbf24',
+              weight: 1,
+            }}
+          >
+            <Tooltip direction="top" offset={[0, -6]} className="map-tooltip">
+              <div style={{ minWidth: 140 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                  {fire.municipality || 'Foco de calor'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px 10px', fontSize: 10 }}>
+                  {fire.brightness && (
+                    <>
+                      <span style={{ color: '#9ca3af' }}>Brilho</span>
+                      <span style={{ fontFamily: 'monospace', color: '#fbbf24' }}>{fire.brightness.toFixed(0)} K</span>
+                    </>
+                  )}
+                  <span style={{ color: '#9ca3af' }}>Data</span>
+                  <span style={{ fontFamily: 'monospace', color: '#e5e7eb' }}>{fire.acq_date || '—'}</span>
+                  {fire.satellite && (
+                    <>
+                      <span style={{ color: '#9ca3af' }}>Satélite</span>
+                      <span style={{ fontFamily: 'monospace', color: '#e5e7eb' }}>{fire.satellite}</span>
+                    </>
+                  )}
+                  {fire.confidence && (
+                    <>
+                      <span style={{ color: '#9ca3af' }}>Confiança</span>
+                      <span style={{ fontFamily: 'monospace', color: '#e5e7eb' }}>{fire.confidence}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </Tooltip>
+          </CircleMarker>
+        )
+      })}
     </>
   )
 }
