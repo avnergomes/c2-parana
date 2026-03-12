@@ -13,7 +13,7 @@ interface MapLegendProps {
 }
 
 export function MapLegend({ activeLayers }: MapLegendProps) {
-  if (!activeLayers.includes('dengue') && !activeLayers.includes('vbp')) return null
+  if (!activeLayers.includes('dengue') && !activeLayers.includes('vbp') && !activeLayers.includes('credito')) return null
 
   return (
     <div className="absolute bottom-8 right-4 z-[1000] card p-3 space-y-3 max-w-[180px] shadow-card-hover">
@@ -31,7 +31,17 @@ export function MapLegend({ activeLayers }: MapLegendProps) {
       {activeLayers.includes('vbp') && (
         <div>
           <p className="text-2xs text-text-muted uppercase tracking-wider font-semibold mb-1.5">VBP Agro (R$ mi)</p>
-          <div className="h-3 w-full rounded" style={{ background: 'linear-gradient(to right, #064e3b, #10b981, #d1fae5)' }} />
+          <div className="h-3 w-full rounded" style={{ background: 'linear-gradient(to right, #064e3b, #10b981, #34d399)' }} />
+          <div className="flex justify-between mt-0.5">
+            <span className="text-2xs text-text-muted">Baixo</span>
+            <span className="text-2xs text-text-muted">Alto</span>
+          </div>
+        </div>
+      )}
+      {activeLayers.includes('credito') && (
+        <div>
+          <p className="text-2xs text-text-muted uppercase tracking-wider font-semibold mb-1.5">Crédito Rural (R$ mi)</p>
+          <div className="h-3 w-full rounded" style={{ background: 'linear-gradient(to right, #4c1d95, #7c3aed, #a78bfa)' }} />
           <div className="flex justify-between mt-0.5">
             <span className="text-2xs text-text-muted">Baixo</span>
             <span className="text-2xs text-text-muted">Alto</span>

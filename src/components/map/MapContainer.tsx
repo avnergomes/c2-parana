@@ -9,6 +9,8 @@ import { MunicipalityPopup } from './MunicipalityPopup'
 import { ClimaLayer } from './layers/ClimaLayer'
 import { QueimadaLayer } from './layers/QueimadaLayer'
 import { DengueLayer } from './layers/DengueLayer'
+import { VbpLayer } from './layers/VbpLayer'
+import { CreditoRuralLayer } from './layers/CreditoRuralLayer'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { MapDataProvider } from '@/contexts/MapDataContext'
 import type { GeoJsonObject, Feature } from 'geojson'
@@ -109,6 +111,20 @@ export function MapModule() {
           {activeLayers.includes('clima') && (
             <ErrorBoundary moduleName="layer clima">
               <ClimaLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: VBP Agro (coroplético) */}
+          {activeLayers.includes('vbp') && isPro && geoJSON && (
+            <ErrorBoundary moduleName="layer vbp">
+              <VbpLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Crédito Rural (coroplético) */}
+          {activeLayers.includes('credito') && isPro && geoJSON && (
+            <ErrorBoundary moduleName="layer credito rural">
+              <CreditoRuralLayer />
             </ErrorBoundary>
           )}
 
