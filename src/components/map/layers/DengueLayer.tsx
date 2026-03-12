@@ -11,27 +11,30 @@ interface DengueData {
   alert_level: number | null
 }
 
+// Index 0-3 = alert levels, index 4 = no data
+const DENGUE_COLORS = ['#065f46', '#92400e', '#c2410c', '#7f1d1d']
+const NO_DATA_COLOR = '#1f2937'
+
 export function DengueLayer() {
   const { municipiosGeoJSON } = useMapData()
 
-  const { data: dengueMap } = useQuery({
+  const { data: dengueMap, isLoading } = useQuery({
     queryKey: ['dengue-map'],
     queryFn: async () => {
       const { data } = await supabase
         .from('dengue_data')
         .select('ibge_code, cases, alert_level')
         .order('epidemiological_week', { ascending: false })
-        .limit(399)  // um por município
+        .limit(399)
 
       const typedData = (data || []) as DengueData[]
       return Object.fromEntries(typedData.map(d => [d.ibge_code, d]))
     },
-    staleTime: 1000 * 60 * 60, // 1h
+    staleTime: 1000 * 60 * 60,
   })
 
-  if (!dengueMap || !municipiosGeoJSON) return null
-
-  const DENGUE_COLORS = ['#065f46', '#92400e', '#c2410c', '#7f1d1d']
+  if (isLoading || !municipiosGeoJSON) return null
+  if (!dengueMap) return null
 
   return (
     <GeoJSON
@@ -39,9 +42,12 @@ export function DengueLayer() {
       data={municipiosGeoJSON}
       style={(feature: Feature | undefined) => {
         const p = feature?.properties
-        const ibge = p?.CD_MUN || p?.codarea || p?.geocodigo
+        const ibge = String(p?.CD_MUN || p?.codarea || p?.geocodigo || '')
         const dengue = dengueMap[ibge]
-        const raw = dengue?.alert_level
+        if (!dengue) {
+          return { fillColor: NO_DATA_COLOR, fillOpacity: 0.2, color: 'transparent', weight: 0 }
+        }
+        const raw = dengue.alert_level
         const level = (typeof raw === 'number' && raw >= 0 && raw <= 3) ? raw : 0
         return {
           fillColor: DENGUE_COLORS[level],

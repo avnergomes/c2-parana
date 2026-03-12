@@ -48,9 +48,13 @@ export function ClimaLayer() {
     refetchInterval: 1000 * 60 * 30,
   })
 
+  if (!stations || stations.length === 0) {
+    return null
+  }
+
   return (
     <>
-      {stations?.map(station => {
+      {stations.map(station => {
         if (!station.latitude || !station.longitude) return null
         const color = tempToColor(station.temperature || 20)
         const icon = divIcon({

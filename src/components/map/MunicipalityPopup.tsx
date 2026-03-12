@@ -33,7 +33,7 @@ export function MunicipalityPopup({ ibgeCode, name, onClose }: MunicipalityPopup
         .eq('ibge_code', ibgeCode)
         .order('observed_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
       return data as ClimaMuniData | null
     },
     staleTime: 1000 * 60 * 10,
@@ -49,7 +49,7 @@ export function MunicipalityPopup({ ibgeCode, name, onClose }: MunicipalityPopup
         .order('year', { ascending: false })
         .order('epidemiological_week', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
       return data as DengueMuniData | null
     },
   })
@@ -64,6 +64,7 @@ export function MunicipalityPopup({ ibgeCode, name, onClose }: MunicipalityPopup
         .gte('acq_date', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
       return count || 0
     },
+    staleTime: 1000 * 60 * 10,
   })
 
   const dengueColors = ['#10b981', '#f59e0b', '#f97316', '#ef4444']

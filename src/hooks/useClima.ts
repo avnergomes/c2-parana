@@ -41,17 +41,22 @@ export function useEstacaoCuritiba() {
   return useQuery({
     queryKey: ['clima-curitiba'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('climate_data')
         .select('*')
         .eq('station_code', 'A807')
         .order('observed_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
+      if (error) {
+        console.warn('Erro ao buscar clima Curitiba:', error.message)
+        return null
+      }
       return data as EstacaoClima | null
     },
     staleTime: 1000 * 60 * 5,
     refetchInterval: 1000 * 60 * 30,
+    retry: 2,
   })
 }
 

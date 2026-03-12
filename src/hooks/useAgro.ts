@@ -30,12 +30,27 @@ export function usePrecosDiarios(produto?: string) {
       const params = new URLSearchParams({ limit: '30' })
       if (produto) params.set('product', produto)
 
-      const res = await fetch(`${PRECOS_API}/api/v1/prices/latest?${params}`, { headers })
-      if (!res.ok) throw new Error('Falha ao buscar preços SIMA')
-      const json = await res.json()
-      return json.prices ?? json.data ?? json
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
+
+      try {
+        const res = await fetch(`${PRECOS_API}/api/v1/prices/latest?${params}`, {
+          headers,
+          signal: controller.signal,
+        })
+        clearTimeout(timeoutId)
+        if (!res.ok) throw new Error(`API retornou ${res.status}`)
+        const json = await res.json()
+        const prices = json.prices ?? json.data ?? json
+        return Array.isArray(prices) ? prices : []
+      } catch (err) {
+        clearTimeout(timeoutId)
+        throw err
+      }
     },
-    staleTime: 1000 * 60 * 60, // 1h
+    staleTime: 1000 * 60 * 60,
+    retry: 1,
+    retryDelay: 3000,
   })
 }
 

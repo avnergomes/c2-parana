@@ -14,7 +14,7 @@ export function DengueMapaCoro() {
   const { data: dengueData } = useDengueAtual()
 
   const { data: geoJSON } = useQuery({
-    queryKey: ['municipios-geojson-saude'],
+    queryKey: ['municipios-geojson'],
     queryFn: async () => {
       const base = import.meta.env.BASE_URL || '/'
       const res = await fetch(`${base}data/municipios-pr.geojson`)

@@ -5,20 +5,16 @@
   <title>C2 Paraná</title>
   <script>
     // SPA redirect for GitHub Pages
-    // Redireciona /c2-parana/qualquer-rota para /c2-parana/?/qualquer-rota
-    var pathSegmentsToKeep = 1; // /c2-parana = 1 segmento
-    var l = window.location;
     var repo = '/c2-parana';
-
-    // Pega o path após /c2-parana/
-    var path = l.pathname.replace(repo, '').replace(/^\//, '');
-
+    var path = window.location.pathname.replace(repo, '').replace(/^\//, '');
     if (path) {
-      // Redireciona para /c2-parana/?/path
-      l.replace(repo + '/?/' + path + (l.search ? '&' + l.search.slice(1) : '') + l.hash);
+      window.location.replace(
+        repo + '/?/' + path +
+        (window.location.search ? '&' + window.location.search.slice(1) : '') +
+        window.location.hash
+      );
     } else {
-      // Redireciona para /c2-parana/
-      l.replace(repo + '/');
+      window.location.replace(repo + '/');
     }
   </script>
 </head>
