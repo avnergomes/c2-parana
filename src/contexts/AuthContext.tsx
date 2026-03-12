@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('Auth loading timeout - continuando sem sessão')
         setLoading(false)
       }
-    }, 2000)
+    }, 8000)
 
     // Pegar sessão inicial
     supabase.auth.getSession().then(({ data: { session } }) => {

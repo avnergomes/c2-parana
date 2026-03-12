@@ -28,7 +28,11 @@ export function useNoticiasRealtime() {
           }
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('[Realtime] Falha na conexão do canal noticias-changes')
+        }
+      })
 
     return () => {
       supabase.removeChannel(channel)

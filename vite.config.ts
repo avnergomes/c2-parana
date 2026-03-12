@@ -24,8 +24,6 @@ export default defineConfig(({ mode }) => ({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
-          maps: ['leaflet', 'react-leaflet'],
-          charts: ['recharts', 'd3'],
           supabase: ['@supabase/supabase-js'],
         },
       },
