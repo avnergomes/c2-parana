@@ -1,5 +1,5 @@
 // src/types/mapa.ts
-export type LayerId = 'clima' | 'queimadas' | 'rios' | 'dengue' | 'vbp' | 'credito'
+export type LayerId = 'clima' | 'queimadas' | 'rios' | 'dengue' | 'vbp' | 'credito' | 'reservatorios'
 
 export interface LayerConfig {
   id: LayerId
@@ -16,6 +16,7 @@ export const LAYER_CONFIGS: LayerConfig[] = [
   { id: 'dengue', label: 'Dengue', color: '#f59e0b', plan: 'pro', description: 'Alertas InfoDengue' },
   { id: 'vbp', label: 'VBP Agro', color: '#10b981', plan: 'pro', description: 'Valor Bruto da Produção' },
   { id: 'credito', label: 'Crédito Rural', color: '#8b5cf6', plan: 'pro', description: 'Crédito rural BCB' },
+  { id: 'reservatorios', label: 'Reservatórios', color: '#06b6d4', plan: 'pro', description: 'Reservatórios SAIC (InfoHidro)' },
 ]
 
 export interface MunicipalityData {

@@ -23,6 +23,7 @@ const SaudePage = lazy(() => import('@/pages/SaudePage').then(m => ({ default: m
 const AmbientePage = lazy(() => import('@/pages/AmbientePage').then(m => ({ default: m.AmbientePage })))
 const NoticiasPage = lazy(() => import('@/pages/NoticiasPage').then(m => ({ default: m.NoticiasPage })))
 const LegislativoPage = lazy(() => import('@/pages/LegislativoPage').then(m => ({ default: m.LegislativoPage })))
+const AguaPage = lazy(() => import('@/pages/AguaPage').then(m => ({ default: m.AguaPage })))
 
 export function AppRouter() {
   return (
@@ -46,6 +47,7 @@ export function AppRouter() {
           <Route path="/agronegocio" element={<AgroPage />} />
           <Route path="/saude" element={<SaudePage />} />
           <Route path="/ambiente" element={<AmbientePage />} />
+          <Route path="/agua" element={<AguaPage />} />
           <Route path="/noticias" element={<NoticiasPage />} />
           <Route path="/legislativo" element={<LegislativoPage />} />
         </Route>
