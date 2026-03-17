@@ -38,7 +38,7 @@ export function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="Plano"
-          value={accessStatus === 'trialing' ? 'Trial' : subscription?.plan?.toUpperCase() || '—'}
+          value={accessStatus === 'trialing' ? 'Trial' : subscription?.plan?.toUpperCase() || (accessStatus === 'active' ? 'PRO' : '—')}
           accentColor="blue"
         />
         <KpiCard
