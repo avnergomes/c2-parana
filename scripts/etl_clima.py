@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""ETL Clima: busca dados das estações INMET do PR e salva no Supabase.
+"""ETL Clima: busca dados meteorológicos do PR e salva no Supabase.
 
-A API apitempo.inmet.gov.br é protegida por WAF (F5 BIG-IP). Para contornar:
-  1. Usa requests.Session para manter cookies entre chamadas
-  2. Envia headers de navegador (User-Agent, Referer, Accept)
-  3. Faz "warm-up" acessando /estacoes/T antes dos dados (endpoint sem WAF)
-  4. Retry com backoff exponencial em caso de 204 (resposta vazia do WAF)
+Fonte primária: API INMET (apitempo.inmet.gov.br)
+Fonte fallback: Open-Meteo (api.open-meteo.com) — gratuita, sem auth, alta disponibilidade
+
+A API INMET é protegida por WAF (F5 BIG-IP) que frequentemente retorna HTTP 204.
+Quando INMET falha, o Open-Meteo garante que dados reais sejam exibidos no dashboard.
 """
 
 import os
 import time
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -20,7 +20,7 @@ load_dotenv()
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
-# Estações INMET no Paraná (código INMET → nome/município/IBGE)
+# Estações INMET no Paraná (código INMET → nome/município/IBGE/coordenadas)
 PR_STATIONS = {
     "A807": {"name": "Curitiba", "municipality": "Curitiba", "ibge": "4106902", "lat": -25.434, "lon": -49.266},
     "A834": {"name": "Londrina", "municipality": "Londrina", "ibge": "4113700", "lat": -23.363, "lon": -51.190},
@@ -36,7 +36,7 @@ PR_STATIONS = {
     "A826": {"name": "Umuarama", "municipality": "Umuarama", "ibge": "4128104", "lat": -23.767, "lon": -53.330},
 }
 
-# Headers que imitam navegador real para evitar bloqueio do WAF
+# Headers para INMET
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -48,28 +48,27 @@ BROWSER_HEADERS = {
 }
 
 MAX_RETRIES = 3
-RETRY_BACKOFF = [2, 5, 10]  # segundos entre retries
+RETRY_BACKOFF = [2, 5, 10]
 
+
+# ─── INMET (fonte primária) ─────────────────────────────────────────
 
 def create_session() -> requests.Session:
     """Cria sessão HTTP com headers de navegador e warm-up de cookies."""
     session = requests.Session()
     session.headers.update(BROWSER_HEADERS)
-
-    # Warm-up: acessar endpoint público para obter cookies do WAF
     try:
         print("Warm-up: obtendo cookies do WAF...")
         r = session.get("https://apitempo.inmet.gov.br/estacoes/T", timeout=15)
         cookies = session.cookies.get_dict()
-        print(f"  Status: {r.status_code} | Cookies obtidos: {list(cookies.keys())}")
+        print(f"  Status: {r.status_code} | Cookies: {list(cookies.keys())}")
     except Exception as e:
-        print(f"  Warm-up falhou (continuando sem cookies): {e}")
-
+        print(f"  Warm-up falhou: {e}")
     return session
 
 
-def fetch_station_data(session: requests.Session, station_code: str, date_ini: str, date_fim: str) -> list:
-    """Busca dados de uma estação INMET com retry e tratamento de WAF."""
+def fetch_station_data_inmet(session: requests.Session, station_code: str, date_ini: str, date_fim: str) -> list:
+    """Busca dados de uma estação INMET com retry."""
     url = f"https://apitempo.inmet.gov.br/estacao/{date_ini}/{date_fim}/{station_code}"
 
     for attempt in range(MAX_RETRIES):
@@ -77,27 +76,18 @@ def fetch_station_data(session: requests.Session, station_code: str, date_ini: s
             response = session.get(url, timeout=30)
             status = response.status_code
             body_len = len(response.content)
-            print(f"    [tentativa {attempt + 1}] HTTP {status} | {body_len} bytes")
+            print(f"    [INMET tentativa {attempt + 1}] HTTP {status} | {body_len} bytes")
 
-            # 204 = WAF bloqueou ou dados realmente vazios
             if status == 204 or body_len == 0:
                 if attempt < MAX_RETRIES - 1:
-                    wait = RETRY_BACKOFF[attempt]
-                    print(f"    Resposta vazia (WAF?). Retry em {wait}s...")
-                    time.sleep(wait)
+                    time.sleep(RETRY_BACKOFF[attempt])
                     continue
-                else:
-                    print(f"    Resposta vazia após {MAX_RETRIES} tentativas para {station_code}")
-                    return []
+                return []
 
-            # INMET às vezes retorna HTML em vez de JSON (manutenção)
             content_type = response.headers.get("Content-Type", "")
             if "text/html" in content_type:
-                print(f"    INMET retornou HTML (manutenção?) para {station_code}")
                 if attempt < MAX_RETRIES - 1:
-                    wait = RETRY_BACKOFF[attempt]
-                    print(f"    Retry em {wait}s...")
-                    time.sleep(wait)
+                    time.sleep(RETRY_BACKOFF[attempt])
                     continue
                 return []
 
@@ -105,43 +95,31 @@ def fetch_station_data(session: requests.Session, station_code: str, date_ini: s
             data = response.json()
 
             if isinstance(data, list):
-                print(f"    Registros retornados: {len(data)}")
-                if data:
-                    sample = data[-1]
-                    print(f"    Último: DT={sample.get('DT_MEDICAO')} HR={sample.get('HR_MEDICAO')} TEM={sample.get('TEM_INS')} UMD={sample.get('UMD_INS')}")
+                print(f"    INMET OK: {len(data)} registros")
                 return data
-            else:
-                print(f"    Resposta não é lista: {type(data)}")
-                return []
+            return []
 
         except requests.exceptions.HTTPError as e:
-            print(f"    HTTP Error estação {station_code}: {e}")
+            print(f"    HTTP Error: {e}")
             try:
-                print(f"    Response body: {response.text[:500]}")
+                print(f"    Body: {response.text[:300]}")
             except Exception:
                 pass
             return []
         except Exception as e:
-            print(f"    Erro na estação {station_code}: {e}")
+            print(f"    Erro: {e}")
             if attempt < MAX_RETRIES - 1:
-                wait = RETRY_BACKOFF[attempt]
-                print(f"    Retry em {wait}s...")
-                time.sleep(wait)
+                time.sleep(RETRY_BACKOFF[attempt])
             else:
                 return []
     return []
 
 
-def parse_station_record(record: dict, station_code: str, meta: dict) -> dict | None:
-    """Converte um registro INMET para o formato do banco."""
+def parse_inmet_record(record: dict, station_code: str, meta: dict) -> dict | None:
+    """Converte registro INMET para formato do banco."""
     try:
-        # Campos INMET: TEM_INS (temp), UMD_INS (umidade), PRE_INS (pressão),
-        # VEN_VEL (vento m/s), VEN_DIR (direção), CHUVA (precipitação)
-        # DT_MEDICAO e HR_MEDICAO para timestamp
-
         dt_str = record.get("DT_MEDICAO", "")
         hr_str = record.get("HR_MEDICAO", "0000")
-
         if not dt_str:
             return None
 
@@ -172,9 +150,115 @@ def parse_station_record(record: dict, station_code: str, meta: dict) -> dict | 
             "observed_at": observed_at,
         }
     except Exception as e:
-        print(f"  Erro ao parsear registro: {e}")
+        print(f"  Erro ao parsear INMET: {e}")
         return None
 
+
+# ─── OPEN-METEO (fallback) ──────────────────────────────────────────
+
+def fetch_openmeteo_current(station_code: str, meta: dict) -> list:
+    """Busca dados atuais via Open-Meteo (fallback quando INMET falha)."""
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": meta["lat"],
+        "longitude": meta["lon"],
+        "current": "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,precipitation",
+        "timezone": "America/Sao_Paulo",
+    }
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        current = data.get("current", {})
+
+        if not current:
+            return []
+
+        # Converter vento de km/h para m/s (INMET usa m/s)
+        wind_kmh = current.get("wind_speed_10m")
+        wind_ms = round(wind_kmh / 3.6, 1) if wind_kmh is not None else None
+
+        observed_at = current.get("time", "")
+        if observed_at and not observed_at.endswith("-03:00"):
+            observed_at += ":00-03:00"
+
+        record = {
+            "station_code": station_code,
+            "station_name": meta["name"],
+            "municipality": meta["municipality"],
+            "ibge_code": meta["ibge"],
+            "latitude": meta["lat"],
+            "longitude": meta["lon"],
+            "temperature": current.get("temperature_2m"),
+            "humidity": current.get("relative_humidity_2m"),
+            "pressure": current.get("surface_pressure"),
+            "wind_speed": wind_ms,
+            "wind_direction": int(current["wind_direction_10m"]) if current.get("wind_direction_10m") is not None else None,
+            "precipitation": current.get("precipitation"),
+            "observed_at": observed_at,
+        }
+        print(f"    Open-Meteo OK: temp={record['temperature']}°C umid={record['humidity']}%")
+        return [record]
+    except Exception as e:
+        print(f"    Open-Meteo ERRO: {e}")
+        return []
+
+
+def fetch_openmeteo_hourly(station_code: str, meta: dict, days: int = 2) -> list:
+    """Busca dados horários via Open-Meteo para preencher histórico."""
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": meta["lat"],
+        "longitude": meta["lon"],
+        "hourly": "temperature_2m,relative_humidity_2m,surface_pressure,wind_speed_10m,wind_direction_10m,precipitation",
+        "timezone": "America/Sao_Paulo",
+        "past_days": days,
+        "forecast_days": 0,
+    }
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        hourly = data.get("hourly", {})
+
+        times = hourly.get("time", [])
+        if not times:
+            return []
+
+        records = []
+        for i, t in enumerate(times):
+            wind_kmh = hourly["wind_speed_10m"][i] if hourly.get("wind_speed_10m") else None
+            wind_ms = round(wind_kmh / 3.6, 1) if wind_kmh is not None else None
+            wind_dir = hourly["wind_direction_10m"][i] if hourly.get("wind_direction_10m") else None
+
+            observed_at = t
+            if not observed_at.endswith("-03:00"):
+                observed_at += ":00-03:00"
+
+            records.append({
+                "station_code": station_code,
+                "station_name": meta["name"],
+                "municipality": meta["municipality"],
+                "ibge_code": meta["ibge"],
+                "latitude": meta["lat"],
+                "longitude": meta["lon"],
+                "temperature": hourly["temperature_2m"][i] if hourly.get("temperature_2m") else None,
+                "humidity": hourly["relative_humidity_2m"][i] if hourly.get("relative_humidity_2m") else None,
+                "pressure": hourly["surface_pressure"][i] if hourly.get("surface_pressure") else None,
+                "wind_speed": wind_ms,
+                "wind_direction": int(wind_dir) if wind_dir is not None else None,
+                "precipitation": hourly["precipitation"][i] if hourly.get("precipitation") else None,
+                "observed_at": observed_at,
+            })
+
+        # Retornar últimas 6 horas
+        return records[-6:]
+    except Exception as e:
+        print(f"    Open-Meteo hourly ERRO: {e}")
+        return []
+
+
+# ─── ALERTAS ─────────────────────────────────────────────────────────
 
 def fetch_alerts(session: requests.Session) -> list:
     """Busca alertas meteorológicos INMET."""
@@ -182,14 +266,10 @@ def fetch_alerts(session: requests.Session) -> list:
     for attempt in range(MAX_RETRIES):
         try:
             response = session.get(url, timeout=30)
-
             if response.status_code == 204 or len(response.content) == 0:
                 if attempt < MAX_RETRIES - 1:
-                    wait = RETRY_BACKOFF[attempt]
-                    print(f"  Alertas: resposta vazia. Retry em {wait}s...")
-                    time.sleep(wait)
+                    time.sleep(RETRY_BACKOFF[attempt])
                     continue
-                print("  Alertas: sem resposta após retries")
                 return []
 
             response.raise_for_status()
@@ -197,7 +277,6 @@ def fetch_alerts(session: requests.Session) -> list:
 
             alerts = []
             for item in (data if isinstance(data, list) else []):
-                # Filtrar alertas que afetam o Paraná
                 uf = item.get("estados", [])
                 if isinstance(uf, list) and "PR" not in uf:
                     continue
@@ -228,7 +307,7 @@ def fetch_alerts(session: requests.Session) -> list:
                 })
             return alerts
         except Exception as e:
-            print(f"  Erro ao buscar alertas (tentativa {attempt + 1}): {e}")
+            print(f"  Erro alertas (tentativa {attempt + 1}): {e}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_BACKOFF[attempt])
             else:
@@ -236,58 +315,74 @@ def fetch_alerts(session: requests.Session) -> list:
     return []
 
 
+# ─── MAIN ────────────────────────────────────────────────────────────
+
 def main():
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     session = create_session()
 
     now = datetime.now()
-    # Usar janela de 2 dias para cobrir diferenças UTC/BRT
     date_fim = now.strftime("%Y-%m-%d")
     date_ini = (now - timedelta(days=2)).strftime("%Y-%m-%d")
 
-    print(f"Buscando dados INMET: {date_ini} a {date_fim}")
-    print(f"Timestamp atual (UTC no Actions): {now.isoformat()}")
+    print(f"Buscando dados: {date_ini} a {date_fim}")
+    print(f"Timestamp: {now.isoformat()}")
 
     all_records = []
-    stations_ok = 0
-    stations_empty = 0
+    inmet_ok = 0
+    openmeteo_ok = 0
+    failed = 0
 
     for station_code, meta in PR_STATIONS.items():
-        print(f"  Estação {station_code} — {meta['name']}")
-        raw_data = fetch_station_data(session, station_code, date_ini, date_fim)
+        print(f"\n  Estação {station_code} — {meta['name']}")
+
+        # 1) Tentar INMET primeiro
+        raw_data = fetch_station_data_inmet(session, station_code, date_ini, date_fim)
+        station_records = []
 
         if raw_data:
-            stations_ok += 1
-        else:
-            stations_empty += 1
+            inmet_ok += 1
+            for record in raw_data[-6:]:
+                parsed = parse_inmet_record(record, station_code, meta)
+                if parsed:
+                    has_data = any([
+                        parsed.get("temperature") is not None,
+                        parsed.get("humidity") is not None,
+                        parsed.get("wind_speed") is not None,
+                        parsed.get("precipitation") is not None,
+                    ])
+                    if has_data:
+                        station_records.append(parsed)
 
-        for record in raw_data[-6:]:  # últimas 6 medições
-            parsed = parse_station_record(record, station_code, meta)
-            if parsed:
-                # Aceitar registro se tiver qualquer dado útil (não apenas temperatura)
-                has_data = any([
-                    parsed.get("temperature") is not None,
-                    parsed.get("humidity") is not None,
-                    parsed.get("wind_speed") is not None,
-                    parsed.get("precipitation") is not None,
-                ])
-                if has_data:
-                    all_records.append(parsed)
+        # 2) Se INMET falhou → Open-Meteo como fallback
+        if not station_records:
+            print(f"    INMET sem dados, tentando Open-Meteo...")
+            # Buscar dados horários (últimas horas) + current
+            station_records = fetch_openmeteo_hourly(station_code, meta, days=2)
+            if not station_records:
+                station_records = fetch_openmeteo_current(station_code, meta)
 
-    print(f"\nResumo: {stations_ok} estações com dados, {stations_empty} sem dados")
-    print(f"Total de registros válidos: {len(all_records)}")
+            if station_records:
+                openmeteo_ok += 1
+            else:
+                failed += 1
+
+        all_records.extend(station_records)
+
+    print(f"\n{'='*50}")
+    print(f"Resumo: INMET={inmet_ok} | Open-Meteo={openmeteo_ok} | Falhas={failed}")
+    print(f"Total registros válidos: {len(all_records)}")
 
     if all_records:
-        print(f"  Amostra: station={all_records[0]['station_code']} temp={all_records[0]['temperature']} at={all_records[0]['observed_at']}")
+        print(f"  Amostra: {all_records[0]['station_code']} temp={all_records[0]['temperature']}°C at={all_records[0]['observed_at']}")
         try:
             result = supabase.table("climate_data").upsert(
                 all_records,
                 on_conflict="station_code,observed_at"
             ).execute()
-            print(f"Inseridos/atualizados: {len(all_records)} registros de clima")
+            print(f"Inseridos/atualizados: {len(all_records)} registros")
         except Exception as e:
-            print(f"ERRO no upsert Supabase: {e}")
-            # Tentar inserir um por um para identificar o registro problemático
+            print(f"ERRO upsert: {e}")
             for rec in all_records[:3]:
                 try:
                     supabase.table("climate_data").upsert(
@@ -297,34 +392,26 @@ def main():
                 except Exception as e2:
                     print(f"    FALHA: {rec['station_code']} -> {e2}")
 
-        # Limpar dados com mais de 48h
+        # Limpar dados antigos (>48h)
         cutoff = (now - timedelta(hours=48)).isoformat()
         supabase.table("climate_data").delete().lt("observed_at", cutoff).execute()
         print("Dados antigos limpos (>48h)")
     else:
-        if stations_empty == len(PR_STATIONS):
-            print("ATENÇÃO: NENHUMA estação retornou dados!")
-            print("  Possíveis causas:")
-            print("  - WAF do INMET bloqueando requests (HTTP 204)")
-            print("  - API do INMET em manutenção")
-            print("  - Dados ainda não publicados para o período")
-        print("Nenhum dado de clima para inserir")
+        print("ATENÇÃO: Nenhum dado obtido de nenhuma fonte!")
+        print("  Verificar conectividade e status das APIs")
 
-    # Buscar e salvar alertas
+    # Alertas
     print("\nBuscando alertas INMET...")
     alerts = fetch_alerts(session)
 
     if alerts:
-        # Primeiro faz upsert dos novos alertas
         new_ids = [a["external_id"] for a in alerts if a.get("external_id")]
         try:
-            result = supabase.table("alerts").upsert(
-                alerts,
-                on_conflict="external_id"
+            supabase.table("alerts").upsert(
+                alerts, on_conflict="external_id"
             ).execute()
             print(f"Alertas salvos: {len(alerts)}")
 
-            # Só depois desativa os alertas que NÃO vieram na nova resposta
             if new_ids:
                 supabase.table("alerts") \
                     .update({"is_active": False}) \
@@ -333,7 +420,7 @@ def main():
                     .execute()
                 print(f"Alertas antigos desativados (exceto {len(new_ids)} ativos)")
         except Exception as e:
-            print(f"ERRO ao salvar alertas: {e}")
+            print(f"ERRO alertas: {e}")
     else:
         print("Nenhum alerta INMET para o PR")
 

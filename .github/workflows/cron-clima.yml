@@ -1,11 +1,15 @@
 # .github/workflows/cron-clima.yml
 # Budget: ~12 min/dia (24 exec × ~30s)
-name: ETL Clima (INMET)
+# Fonte primária: INMET | Fallback: Open-Meteo
+name: ETL Clima (INMET + Open-Meteo)
 
 on:
   schedule:
     - cron: '0 * * * *'   # A cada hora (24 exec/dia)
   workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   etl-clima:
