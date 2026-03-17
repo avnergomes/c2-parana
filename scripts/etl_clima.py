@@ -30,7 +30,7 @@ PR_STATIONS = {
 
 def fetch_station_data(station_code: str, date_ini: str, date_fim: str) -> list:
     """Busca dados de uma estação INMET."""
-    url = f"https://apitempo.inmet.gov.br/estacao/{date_ini}/{date_fim}/{station_code}"
+    url = f"https://apitempo.inmet.gov.br/estacao/dados/{station_code}/{date_ini}/{date_fim}"
     headers = {"User-Agent": "c2-parana/1.0 (ETL Clima)"}
     try:
         response = requests.get(url, headers=headers, timeout=30)
@@ -56,6 +56,7 @@ def fetch_station_data(station_code: str, date_ini: str, date_fim: str) -> list:
             return []
     except requests.exceptions.HTTPError as e:
         print(f"    HTTP Error estação {station_code}: {e}")
+        print(f"    Response body: {response.text[:500]}")
         return []
     except Exception as e:
         print(f"    Erro na estação {station_code}: {e}")
@@ -210,14 +211,25 @@ def main():
     alerts = fetch_alerts()
 
     if alerts:
-        # Desativar alertas antigos do INMET
-        supabase.table("alerts").update({"is_active": False}).eq("source", "inmet").execute()
+        # Primeiro faz upsert dos novos alertas
+        new_ids = [a["external_id"] for a in alerts if a.get("external_id")]
+        try:
+            result = supabase.table("alerts").upsert(
+                alerts,
+                on_conflict="external_id"
+            ).execute()
+            print(f"Alertas salvos: {len(alerts)}")
 
-        result = supabase.table("alerts").upsert(
-            alerts,
-            on_conflict="external_id"
-        ).execute()
-        print(f"Alertas salvos: {len(alerts)}")
+            # Só depois desativa os alertas que NÃO vieram na nova resposta
+            if new_ids:
+                supabase.table("alerts") \
+                    .update({"is_active": False}) \
+                    .eq("source", "inmet") \
+                    .not_.in_("external_id", new_ids) \
+                    .execute()
+                print(f"Alertas antigos desativados (exceto {len(new_ids)} ativos)")
+        except Exception as e:
+            print(f"ERRO ao salvar alertas: {e}")
     else:
         print("Nenhum alerta INMET para o PR")
 

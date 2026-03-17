@@ -25,7 +25,14 @@
       "Bash(\"C:/Users/avner/AppData/Local/Programs/Python/Python312/python.exe\" etl_legislativo.py)",
       "Bash(\"C:/Users/avner/AppData/Local/Programs/Python/Python312/python.exe\" etl_agro.py)",
       "Bash(\"C:/Users/avner/AppData/Local/Programs/Python/Python312/python.exe\" etl_saude.py)",
-      "mcp__docker-mcp__read_file"
+      "mcp__docker-mcp__read_file",
+      "Bash(xargs cat:*)",
+      "Bash(curl:*)",
+      "Bash(rtk npm:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)",
+      "Bash(rtk git:*)",
+      "Bash(cd:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

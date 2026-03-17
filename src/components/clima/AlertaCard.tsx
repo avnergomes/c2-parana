@@ -8,7 +8,7 @@ interface AlertaCardProps {
 }
 
 export function AlertaCard({ alerta }: AlertaCardProps) {
-  const config = SEVERITY_CONFIG[alerta.severity]
+  const config = SEVERITY_CONFIG[alerta.severity] ?? SEVERITY_CONFIG.info
 
   return (
     <div
