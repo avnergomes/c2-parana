@@ -99,26 +99,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const accessStatus = React.useMemo((): AuthContextType['accessStatus'] => {
-    if (loading) return 'loading'
-    if (!subscription) return 'none'
-
-    const { status, trial_end } = subscription
-
-    if (status === 'trialing') {
-      if (!trial_end) return 'expired'
-      return new Date(trial_end) > new Date() ? 'trialing' : 'expired'
-    }
-
-    return status as AuthContextType['accessStatus']
-  }, [subscription, loading])
+  // TODO: Reativar quando auth e Stripe estiverem configurados:
+  // const accessStatus = React.useMemo((): AuthContextType['accessStatus'] => {
+  //   if (loading) return 'loading'
+  //   if (!subscription) return 'none'
+  //   const { status, trial_end } = subscription
+  //   if (status === 'trialing') {
+  //     if (!trial_end) return 'expired'
+  //     return new Date(trial_end) > new Date() ? 'trialing' : 'expired'
+  //   }
+  //   return status as AuthContextType['accessStatus']
+  // }, [subscription, loading])
 
   // TEMPORÁRIO: Acesso livre total para testes (auth + paywall desativados)
   // TODO: Reativar quando auth e Stripe estiverem configurados:
   // const hasAccess = accessStatus === 'trialing' || accessStatus === 'active'
   // const isPro = hasAccess && (subscription?.plan === 'pro' || subscription?.plan === 'enterprise')
+  // const computedAccessStatus = accessStatus
   const hasAccess = true
   const isPro = true
+  const computedAccessStatus: AuthContextType['accessStatus'] = 'active'
 
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -165,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user, session, subscription, loading,
-      accessStatus, hasAccess, isPro,
+      accessStatus: computedAccessStatus, hasAccess, isPro,
       signIn, signUp, signInWithGoogle, signOut,
       resetPassword, refreshSubscription,
     }}>
