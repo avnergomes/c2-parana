@@ -1,37 +1,11 @@
 // src/hooks/useNoticias.ts
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import type { Database } from '@/types/supabase'
 import type { NoticiaItem, LegislativoItem } from '@/types/noticias'
 
-// Type for news_items table
-interface NewsItemRow {
-  id: string
-  source: string
-  title: string
-  description: string | null
-  url: string
-  image_url: string | null
-  published_at: string
-  urgency: string
-  category: string | null
-  keywords: string[] | null
-  fetched_at: string
-}
-
-// Type for legislative_items table
-interface LegislativeItemRow {
-  id: string
-  external_id: string | null
-  type: string
-  number: string | null
-  year: number | null
-  title: string
-  description: string | null
-  author: string | null
-  status: string | null
-  url: string | null
-  published_at: string | null
-}
+type NewsItemRow = Database['public']['Tables']['news_items']['Row']
+type LegislativeItemRow = Database['public']['Tables']['legislative_items']['Row']
 
 interface UseNoticiasOptions {
   source?: NoticiaItem['source'] | 'all'
@@ -92,7 +66,7 @@ export function useNoticiasStats() {
       const { data } = await supabase
         .from('news_items')
         .select('urgency')
-        .gte('published_at', since) as { data: Array<{ urgency: string }> | null }
+        .gte('published_at', since) as { data: Pick<NewsItemRow, 'urgency'>[] | null }
 
       const urgentes = data?.filter(n => n.urgency === 'urgent').length || 0
       const importantes = data?.filter(n => n.urgency === 'important').length || 0

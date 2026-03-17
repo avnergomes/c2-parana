@@ -59,14 +59,23 @@ export function MapModule() {
   const { data: geoJSON } = useQuery({
     queryKey: ['municipios-geojson'],
     queryFn: async () => {
-      const base = import.meta.env.BASE_URL || '/'
-      const res = await fetch(`${base}data/municipios-pr.geojson`)
-      if (!res.ok) {
-        // Fallback: IBGE direto
-        const ibgeRes = await fetch('https://servicodados.ibge.gov.br/api/v2/malhas/41/?resolucao=5&formato=application/vnd.geo+json')
-        return ibgeRes.json() as Promise<GeoJsonObject>
+      try {
+        const base = import.meta.env.BASE_URL || '/'
+        const res = await fetch(`${base}data/municipios-pr.geojson`)
+        if (!res.ok) {
+          // Fallback: IBGE direto
+          const ibgeRes = await fetch('https://servicodados.ibge.gov.br/api/v2/malhas/41/?resolucao=5&formato=application/vnd.geo+json')
+          if (!ibgeRes.ok) {
+            console.error(`GeoJSON fallback failed: IBGE returned ${ibgeRes.status}`)
+            return null
+          }
+          return ibgeRes.json() as Promise<GeoJsonObject>
+        }
+        return res.json() as Promise<GeoJsonObject>
+      } catch (err) {
+        console.error('Failed to load GeoJSON for municipalities:', err)
+        return null
       }
-      return res.json() as Promise<GeoJsonObject>
     },
     staleTime: Infinity, // GeoJSON não muda
   })

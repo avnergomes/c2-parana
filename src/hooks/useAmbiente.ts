@@ -1,47 +1,12 @@
 // src/hooks/useAmbiente.ts
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import type { Database } from '@/types/supabase'
 import type { FireSpot, RiverLevel, AirQualityData } from '@/types/ambiente'
 
-// Type for fire_spots table
-interface FireSpotRow {
-  id: string
-  latitude: number
-  longitude: number
-  brightness: number | null
-  acq_date: string
-  satellite: string | null
-  confidence: string | null
-  municipality: string | null
-  ibge_code: string | null
-}
-
-// Type for river_levels table
-interface RiverLevelRow {
-  id: string
-  station_code: string
-  station_name: string
-  river_name: string | null
-  municipality: string | null
-  latitude: number | null
-  longitude: number | null
-  level_cm: number | null
-  flow_m3s: number | null
-  alert_level: string
-  observed_at: string
-}
-
-// Type for air_quality table
-interface AirQualityRow {
-  id: string
-  city: string
-  station_name: string | null
-  aqi: number | null
-  dominant_pollutant: string | null
-  pm25: number | null
-  pm10: number | null
-  observed_at: string
-}
+type FireSpotRow = Database['public']['Tables']['fire_spots']['Row']
+type RiverLevelRow = Database['public']['Tables']['river_levels']['Row']
+type AirQualityRow = Database['public']['Tables']['air_quality']['Row']
 
 export function useFireSpots(days = 7) {
   return useQuery({
@@ -71,7 +36,7 @@ export function useFireTrend(days = 30) {
         .from('fire_spots')
         .select('acq_date')
         .gte('acq_date', since)
-        .order('acq_date', { ascending: true }) as { data: Array<{ acq_date: string }> | null }
+        .order('acq_date', { ascending: true }) as { data: Pick<FireSpotRow, 'acq_date'>[] | null }
 
       // Agrupar por dia
       const byDay = (data || []).reduce((acc, spot) => {
