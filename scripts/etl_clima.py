@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
-"""ETL Clima: busca dados das estações INMET do PR e salva no Supabase."""
+"""ETL Clima: busca dados das estações INMET do PR e salva no Supabase.
+
+A API apitempo.inmet.gov.br é protegida por WAF (F5 BIG-IP). Para contornar:
+  1. Usa requests.Session para manter cookies entre chamadas
+  2. Envia headers de navegador (User-Agent, Referer, Accept)
+  3. Faz "warm-up" acessando /estacoes/T antes dos dados (endpoint sem WAF)
+  4. Retry com backoff exponencial em caso de 204 (resposta vazia do WAF)
+"""
 
 import os
+import time
 import requests
 from datetime import datetime, timedelta
 from supabase import create_client, Client
@@ -28,39 +36,101 @@ PR_STATIONS = {
     "A826": {"name": "Umuarama", "municipality": "Umuarama", "ibge": "4128104", "lat": -23.767, "lon": -53.330},
 }
 
-def fetch_station_data(station_code: str, date_ini: str, date_fim: str) -> list:
-    """Busca dados de uma estação INMET."""
-    url = f"https://apitempo.inmet.gov.br/estacao/dados/{station_code}/{date_ini}/{date_fim}"
-    headers = {"User-Agent": "c2-parana/1.0 (ETL Clima)"}
+# Headers que imitam navegador real para evitar bloqueio do WAF
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Origin": "https://tempo.inmet.gov.br",
+    "Referer": "https://tempo.inmet.gov.br/",
+    "Connection": "keep-alive",
+}
+
+MAX_RETRIES = 3
+RETRY_BACKOFF = [2, 5, 10]  # segundos entre retries
+
+
+def create_session() -> requests.Session:
+    """Cria sessão HTTP com headers de navegador e warm-up de cookies."""
+    session = requests.Session()
+    session.headers.update(BROWSER_HEADERS)
+
+    # Warm-up: acessar endpoint público para obter cookies do WAF
     try:
-        response = requests.get(url, headers=headers, timeout=30)
-        print(f"    HTTP {response.status_code} | Content-Length: {len(response.content)} bytes")
-
-        # INMET às vezes retorna HTML em vez de JSON (manutenção)
-        content_type = response.headers.get('Content-Type', '')
-        if 'text/html' in content_type:
-            print(f"    INMET retornou HTML (manutenção?) para {station_code}")
-            return []
-
-        response.raise_for_status()
-        data = response.json()
-
-        if isinstance(data, list):
-            print(f"    Registros retornados: {len(data)}")
-            if data:
-                sample = data[-1]
-                print(f"    Último: DT={sample.get('DT_MEDICAO')} HR={sample.get('HR_MEDICAO')} TEM={sample.get('TEM_INS')} UMD={sample.get('UMD_INS')}")
-            return data
-        else:
-            print(f"    Resposta não é lista: {type(data)}")
-            return []
-    except requests.exceptions.HTTPError as e:
-        print(f"    HTTP Error estação {station_code}: {e}")
-        print(f"    Response body: {response.text[:500]}")
-        return []
+        print("Warm-up: obtendo cookies do WAF...")
+        r = session.get("https://apitempo.inmet.gov.br/estacoes/T", timeout=15)
+        cookies = session.cookies.get_dict()
+        print(f"  Status: {r.status_code} | Cookies obtidos: {list(cookies.keys())}")
     except Exception as e:
-        print(f"    Erro na estação {station_code}: {e}")
-        return []
+        print(f"  Warm-up falhou (continuando sem cookies): {e}")
+
+    return session
+
+
+def fetch_station_data(session: requests.Session, station_code: str, date_ini: str, date_fim: str) -> list:
+    """Busca dados de uma estação INMET com retry e tratamento de WAF."""
+    url = f"https://apitempo.inmet.gov.br/estacao/{date_ini}/{date_fim}/{station_code}"
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = session.get(url, timeout=30)
+            status = response.status_code
+            body_len = len(response.content)
+            print(f"    [tentativa {attempt + 1}] HTTP {status} | {body_len} bytes")
+
+            # 204 = WAF bloqueou ou dados realmente vazios
+            if status == 204 or body_len == 0:
+                if attempt < MAX_RETRIES - 1:
+                    wait = RETRY_BACKOFF[attempt]
+                    print(f"    Resposta vazia (WAF?). Retry em {wait}s...")
+                    time.sleep(wait)
+                    continue
+                else:
+                    print(f"    Resposta vazia após {MAX_RETRIES} tentativas para {station_code}")
+                    return []
+
+            # INMET às vezes retorna HTML em vez de JSON (manutenção)
+            content_type = response.headers.get("Content-Type", "")
+            if "text/html" in content_type:
+                print(f"    INMET retornou HTML (manutenção?) para {station_code}")
+                if attempt < MAX_RETRIES - 1:
+                    wait = RETRY_BACKOFF[attempt]
+                    print(f"    Retry em {wait}s...")
+                    time.sleep(wait)
+                    continue
+                return []
+
+            response.raise_for_status()
+            data = response.json()
+
+            if isinstance(data, list):
+                print(f"    Registros retornados: {len(data)}")
+                if data:
+                    sample = data[-1]
+                    print(f"    Último: DT={sample.get('DT_MEDICAO')} HR={sample.get('HR_MEDICAO')} TEM={sample.get('TEM_INS')} UMD={sample.get('UMD_INS')}")
+                return data
+            else:
+                print(f"    Resposta não é lista: {type(data)}")
+                return []
+
+        except requests.exceptions.HTTPError as e:
+            print(f"    HTTP Error estação {station_code}: {e}")
+            try:
+                print(f"    Response body: {response.text[:500]}")
+            except Exception:
+                pass
+            return []
+        except Exception as e:
+            print(f"    Erro na estação {station_code}: {e}")
+            if attempt < MAX_RETRIES - 1:
+                wait = RETRY_BACKOFF[attempt]
+                print(f"    Retry em {wait}s...")
+                time.sleep(wait)
+            else:
+                return []
+    return []
+
 
 def parse_station_record(record: dict, station_code: str, meta: dict) -> dict | None:
     """Converte um registro INMET para o formato do banco."""
@@ -83,7 +153,7 @@ def parse_station_record(record: dict, station_code: str, meta: dict) -> dict | 
                 return None
             try:
                 return float(str(val).replace(",", "."))
-            except:
+            except Exception:
                 return None
 
         return {
@@ -105,52 +175,70 @@ def parse_station_record(record: dict, station_code: str, meta: dict) -> dict | 
         print(f"  Erro ao parsear registro: {e}")
         return None
 
-def fetch_alerts() -> list:
+
+def fetch_alerts(session: requests.Session) -> list:
     """Busca alertas meteorológicos INMET."""
     url = "https://apialerta.inmet.gov.br/v4/avisos"
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = session.get(url, timeout=30)
 
-        alerts = []
-        for item in (data if isinstance(data, list) else []):
-            # Filtrar alertas que afetam o Paraná
-            uf = item.get("estados", [])
-            if isinstance(uf, list) and "PR" not in uf:
-                continue
-            if isinstance(uf, str) and "PR" not in uf:
-                continue
+            if response.status_code == 204 or len(response.content) == 0:
+                if attempt < MAX_RETRIES - 1:
+                    wait = RETRY_BACKOFF[attempt]
+                    print(f"  Alertas: resposta vazia. Retry em {wait}s...")
+                    time.sleep(wait)
+                    continue
+                print("  Alertas: sem resposta após retries")
+                return []
 
-            severity_map = {
-                "VERMELHO": "critical",
-                "LARANJA": "high",
-                "AMARELO": "medium",
-                "VERDE": "low",
-            }
-            cor = item.get("cor", "").upper()
-            severity = severity_map.get(cor, "info")
+            response.raise_for_status()
+            data = response.json()
 
-            alerts.append({
-                "source": "inmet",
-                "severity": severity,
-                "title": item.get("evento", "Alerta Meteorológico"),
-                "description": item.get("descricao") or item.get("endArea") or None,
-                "affected_area": item.get("geometry") or item.get("area"),
-                "affected_municipalities": None,
-                "starts_at": item.get("inicio"),
-                "ends_at": item.get("fim"),
-                "is_active": True,
-                "external_id": str(item.get("id") or item.get("idAlerta", "")),
-                "raw_data": item,
-            })
-        return alerts
-    except Exception as e:
-        print(f"Erro ao buscar alertas: {e}")
-        return []
+            alerts = []
+            for item in (data if isinstance(data, list) else []):
+                # Filtrar alertas que afetam o Paraná
+                uf = item.get("estados", [])
+                if isinstance(uf, list) and "PR" not in uf:
+                    continue
+                if isinstance(uf, str) and "PR" not in uf:
+                    continue
+
+                severity_map = {
+                    "VERMELHO": "critical",
+                    "LARANJA": "high",
+                    "AMARELO": "medium",
+                    "VERDE": "low",
+                }
+                cor = item.get("cor", "").upper()
+                severity = severity_map.get(cor, "info")
+
+                alerts.append({
+                    "source": "inmet",
+                    "severity": severity,
+                    "title": item.get("evento", "Alerta Meteorológico"),
+                    "description": item.get("descricao") or item.get("endArea") or None,
+                    "affected_area": item.get("geometry") or item.get("area"),
+                    "affected_municipalities": None,
+                    "starts_at": item.get("inicio"),
+                    "ends_at": item.get("fim"),
+                    "is_active": True,
+                    "external_id": str(item.get("id") or item.get("idAlerta", "")),
+                    "raw_data": item,
+                })
+            return alerts
+        except Exception as e:
+            print(f"  Erro ao buscar alertas (tentativa {attempt + 1}): {e}")
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(RETRY_BACKOFF[attempt])
+            else:
+                return []
+    return []
+
 
 def main():
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    session = create_session()
 
     now = datetime.now()
     # Usar janela de 2 dias para cobrir diferenças UTC/BRT
@@ -161,11 +249,19 @@ def main():
     print(f"Timestamp atual (UTC no Actions): {now.isoformat()}")
 
     all_records = []
+    stations_ok = 0
+    stations_empty = 0
+
     for station_code, meta in PR_STATIONS.items():
         print(f"  Estação {station_code} — {meta['name']}")
-        raw_data = fetch_station_data(station_code, date_ini, date_fim)
+        raw_data = fetch_station_data(session, station_code, date_ini, date_fim)
 
-        for record in raw_data[-6:]:  # últimas 6 medições (ampliado de 2)
+        if raw_data:
+            stations_ok += 1
+        else:
+            stations_empty += 1
+
+        for record in raw_data[-6:]:  # últimas 6 medições
             parsed = parse_station_record(record, station_code, meta)
             if parsed:
                 # Aceitar registro se tiver qualquer dado útil (não apenas temperatura)
@@ -178,7 +274,9 @@ def main():
                 if has_data:
                     all_records.append(parsed)
 
+    print(f"\nResumo: {stations_ok} estações com dados, {stations_empty} sem dados")
     print(f"Total de registros válidos: {len(all_records)}")
+
     if all_records:
         print(f"  Amostra: station={all_records[0]['station_code']} temp={all_records[0]['temperature']} at={all_records[0]['observed_at']}")
         try:
@@ -204,11 +302,17 @@ def main():
         supabase.table("climate_data").delete().lt("observed_at", cutoff).execute()
         print("Dados antigos limpos (>48h)")
     else:
+        if stations_empty == len(PR_STATIONS):
+            print("ATENÇÃO: NENHUMA estação retornou dados!")
+            print("  Possíveis causas:")
+            print("  - WAF do INMET bloqueando requests (HTTP 204)")
+            print("  - API do INMET em manutenção")
+            print("  - Dados ainda não publicados para o período")
         print("Nenhum dado de clima para inserir")
 
     # Buscar e salvar alertas
-    print("Buscando alertas INMET...")
-    alerts = fetch_alerts()
+    print("\nBuscando alertas INMET...")
+    alerts = fetch_alerts(session)
 
     if alerts:
         # Primeiro faz upsert dos novos alertas
@@ -233,7 +337,8 @@ def main():
     else:
         print("Nenhum alerta INMET para o PR")
 
-    print("ETL Clima concluído!")
+    print("\nETL Clima concluído!")
+
 
 if __name__ == "__main__":
     main()
