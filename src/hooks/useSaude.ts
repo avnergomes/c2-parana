@@ -1,30 +1,11 @@
 // src/hooks/useSaude.ts
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import type { Database } from '@/types/supabase'
 import type { DengueData, SaudeKpis } from '@/types/saude'
 
-// Type for dengue_data table results
-interface DengueDataRow {
-  id: string
-  ibge_code: string
-  municipality_name: string | null
-  epidemiological_week: number
-  year: number
-  cases: number
-  cases_est: number | null
-  alert_level: number
-  incidence_rate: number | null
-  population: number | null
-  fetched_at: string
-}
-
-// Type for data_cache table results
-interface DataCacheRow {
-  cache_key: string
-  source: string | null
-  data: unknown
-  fetched_at: string
-}
+type DengueDataRow = Database['public']['Tables']['dengue_data']['Row']
+type DataCacheRow = Database['public']['Tables']['data_cache']['Row']
 
 export function useDengueAtual() {
   return useQuery({
@@ -37,7 +18,7 @@ export function useDengueAtual() {
         .order('year', { ascending: false })
         .order('epidemiological_week', { ascending: false })
         .limit(1)
-        .single() as { data: { year: number; epidemiological_week: number } | null }
+        .maybeSingle() as { data: Pick<DengueDataRow, 'year' | 'epidemiological_week'> | null }
 
       if (!latest) return []
 
@@ -73,14 +54,7 @@ export function useDengueSerie(ibgeCode?: string, semanas = 12) {
         query = query.limit(1000)
       }
 
-      const { data } = await query as { data: Array<{
-        ibge_code: string
-        municipality_name: string | null
-        epidemiological_week: number
-        year: number
-        cases: number
-        alert_level: number
-      }> | null }
+      const { data } = await query as { data: Pick<DengueDataRow, 'ibge_code' | 'municipality_name' | 'epidemiological_week' | 'year' | 'cases' | 'alert_level'>[] | null }
       return data || []
     },
     staleTime: 1000 * 60 * 60,
@@ -98,7 +72,7 @@ export function useSaudeKpis() {
         .order('year', { ascending: false })
         .order('epidemiological_week', { ascending: false })
         .limit(1)
-        .single() as { data: { year: number; epidemiological_week: number } | null }
+        .maybeSingle() as { data: Pick<DengueDataRow, 'year' | 'epidemiological_week'> | null }
 
       if (!latest) return null
 
@@ -106,7 +80,7 @@ export function useSaudeKpis() {
         .from('dengue_data')
         .select('cases, alert_level')
         .eq('year', latest.year)
-        .eq('epidemiological_week', latest.epidemiological_week) as { data: Array<{ cases: number; alert_level: number }> | null }
+        .eq('epidemiological_week', latest.epidemiological_week) as { data: Pick<DengueDataRow, 'cases' | 'alert_level'>[] | null }
 
       const prevWeek = latest.epidemiological_week > 1
         ? latest.epidemiological_week - 1
@@ -116,7 +90,7 @@ export function useSaudeKpis() {
         .from('dengue_data')
         .select('cases')
         .eq('year', latest.epidemiological_week > 1 ? latest.year : latest.year - 1)
-        .eq('epidemiological_week', prevWeek) as { data: Array<{ cases: number }> | null }
+        .eq('epidemiological_week', prevWeek) as { data: Pick<DengueDataRow, 'cases'>[] | null }
 
       const totalCasos = current?.reduce((s, d) => s + (d.cases || 0), 0) || 0
       const totalCasosAnterior = previous?.reduce((s, d) => s + (d.cases || 0), 0) || 0
@@ -131,7 +105,7 @@ export function useSaudeKpis() {
         .from('data_cache')
         .select('data')
         .eq('cache_key', 'leitos_sus_pr')
-        .single() as { data: DataCacheRow | null }
+        .maybeSingle() as { data: Pick<DataCacheRow, 'data'> | null }
 
       return {
         total_casos_semana: totalCasos,
@@ -154,7 +128,7 @@ export function useLeitosSUS() {
         .from('data_cache')
         .select('data, fetched_at')
         .eq('cache_key', 'leitos_sus_pr')
-        .single() as { data: DataCacheRow | null }
+        .maybeSingle() as { data: Pick<DataCacheRow, 'data' | 'fetched_at'> | null }
       return data?.data as {
         total_leitos: number
         leitos_uti: number

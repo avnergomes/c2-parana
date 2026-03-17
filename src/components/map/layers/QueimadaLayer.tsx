@@ -45,13 +45,13 @@ export function QueimadaLayer() {
 
   return (
     <>
-      {fires?.map((fire, i) => {
+      {fires?.map((fire) => {
         const radius = brightnessToRadius(fire.brightness)
         const opacity = brightnessToOpacity(fire.brightness)
 
         return (
           <CircleMarker
-            key={`fire-${i}`}
+            key={`fire-${fire.latitude}-${fire.longitude}-${fire.acq_date}`}
             center={[fire.latitude, fire.longitude]}
             radius={radius}
             pathOptions={{
