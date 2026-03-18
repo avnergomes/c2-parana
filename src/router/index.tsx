@@ -19,6 +19,7 @@ const DashboardPage = lazy(() => import('@/pages/Dashboard').then(m => ({ defaul
 const MapPage = lazy(() => import('@/pages/MapPage').then(m => ({ default: m.MapPage })))
 const ClimaPage = lazy(() => import('@/pages/ClimaPage').then(m => ({ default: m.ClimaPage })))
 const AgroPage = lazy(() => import('@/pages/AgroPage').then(m => ({ default: m.AgroPage })))
+const GetecPage = lazy(() => import('@/pages/GetecPage').then(m => ({ default: m.GetecPage })))
 const SaudePage = lazy(() => import('@/pages/SaudePage').then(m => ({ default: m.SaudePage })))
 const AmbientePage = lazy(() => import('@/pages/AmbientePage').then(m => ({ default: m.AmbientePage })))
 const NoticiasPage = lazy(() => import('@/pages/NoticiasPage').then(m => ({ default: m.NoticiasPage })))
@@ -45,6 +46,7 @@ export function AppRouter() {
           <Route path="/mapa" element={<MapPage />} />
           <Route path="/clima" element={<ClimaPage />} />
           <Route path="/agronegocio" element={<AgroPage />} />
+          <Route path="/getec" element={<GetecPage />} />
           <Route path="/saude" element={<SaudePage />} />
           <Route path="/ambiente" element={<AmbientePage />} />
           <Route path="/agua" element={<AguaPage />} />
