@@ -1,0 +1,40 @@
+# .github/workflows/cron-agua.yml
+# Budget: ~10 min/dia (4 exec × ~2.5 min)
+# Fonte: InfoHidro/SIMEPAR (291 mananciais + 5 reservatórios SAIC)
+# Requer Playwright pois InfoHidro é uma SPA Vue com login JS-only
+name: ETL Água (InfoHidro/SIMEPAR)
+
+on:
+  schedule:
+    - cron: '30 */6 * * *'   # A cada 6 horas (4 exec/dia)
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  etl-agua:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: |
+          pip install -r scripts/requirements.txt
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Executar ETL Água
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          INFOHIDRO_USER: ${{ secrets.INFOHIDRO_USER }}
+          INFOHIDRO_PASS: ${{ secrets.INFOHIDRO_PASS }}
+        run: python scripts/etl_agua.py
