@@ -3,8 +3,8 @@ import { describe, it, expect } from 'vitest'
 import { LAYER_CONFIGS } from '@/types/mapa'
 
 describe('LAYER_CONFIGS', () => {
-  it('has 7 map layers', () => {
-    expect(LAYER_CONFIGS).toHaveLength(7)
+  it('has 8 map layers', () => {
+    expect(LAYER_CONFIGS).toHaveLength(8)
   })
 
   it('includes reservatorios as pro plan layer', () => {
