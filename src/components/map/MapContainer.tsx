@@ -12,6 +12,7 @@ import { DengueLayer } from './layers/DengueLayer'
 import { VbpLayer } from './layers/VbpLayer'
 import { CreditoRuralLayer } from './layers/CreditoRuralLayer'
 import { ReservatoriosLayer } from './layers/ReservatoriosLayer'
+import { ManancialAlertsLayer } from './layers/ManancialAlertsLayer'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { MapDataProvider } from '@/contexts/MapDataContext'
 import type { GeoJsonObject, Feature } from 'geojson'
@@ -178,6 +179,13 @@ export function MapModule() {
           {activeLayers.includes('reservatorios') && isPro && (
             <ErrorBoundary moduleName="layer reservatorios">
               <ReservatoriosLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Alertas Hídricos (mananciais em alerta) */}
+          {activeLayers.includes('alertas_hidricos') && isPro && (
+            <ErrorBoundary moduleName="layer alertas hidricos">
+              <ManancialAlertsLayer />
             </ErrorBoundary>
           )}
 

@@ -268,6 +268,248 @@ def fetch_disponibilidade(session: requests.Session, location_ids: list[str]) ->
     return all_data
 
 
+# ---------------------------------------------------------------------------
+# Mananciais: 291 water sources across Paraná
+# ---------------------------------------------------------------------------
+
+def extract_fountains_from_monitoring(session: requests.Session) -> list[dict]:
+    """Extract Locations.fountains from the /Monitoring page's Vuex store."""
+    try:
+        resp = session.get(f"{INFOHIDRO_BASE}/Monitoring", timeout=30)
+        if resp.status_code != 200:
+            print(f"  Monitoring page: {resp.status_code}")
+            return []
+
+        # The Vuex store is embedded in a <script> tag as JSON
+        # Look for the fountains array in the JS
+        text = resp.text
+
+        # Pattern 1: Vuex state in __INITIAL_STATE__ or window.__state__
+        for pattern in [
+            r'fountains\s*:\s*(\[.*?\])\s*[,}]',
+            r'"fountains"\s*:\s*(\[.*?\])\s*[,}]',
+        ]:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                try:
+                    fountains = json.loads(match.group(1))
+                    if isinstance(fountains, list) and len(fountains) > 0:
+                        print(f"  Encontrados {len(fountains)} mananciais via regex")
+                        return fountains
+                except json.JSONDecodeError:
+                    continue
+
+        # Pattern 2: Extract from full JS bundle — look for large JSON arrays with locationid
+        json_arrays = re.findall(r'\[(\{[^[\]]*"locationid"[^[\]]*\}(?:,\{[^[\]]*"locationid"[^[\]]*\})*)\]', text)
+        for arr_str in json_arrays:
+            try:
+                arr = json.loads(f"[{arr_str}]")
+                if len(arr) > 100:  # Likely the full fountains list
+                    print(f"  Encontrados {len(arr)} mananciais via JSON array")
+                    return arr
+            except json.JSONDecodeError:
+                continue
+
+        print("  Não foi possível extrair mananciais do /Monitoring")
+        return []
+
+    except Exception as e:
+        print(f"  Erro extraindo mananciais: {e}")
+        return []
+
+
+def fetch_water_availability_batch(session: requests.Session, location_ids: list[int], batch_size: int = 20) -> dict:
+    """Fetch water availability data for multiple locations in batches."""
+    result = {}
+    for i in range(0, len(location_ids), batch_size):
+        batch = location_ids[i:i + batch_size]
+        ids_param = ",".join(str(lid) for lid in batch)
+        try:
+            resp = session.get(
+                f"{INFOHIDRO_BASE}/forecast/v1/wateravailability",
+                params={"location_ids": ids_param},
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list):
+                    for d in data:
+                        lid = d.get("locationid")
+                        if lid is not None:
+                            result[int(lid)] = {
+                                "q1": to_float(d.get("q1")),
+                                "q30": to_float(d.get("q30")),
+                                "date": d.get("date", ""),
+                            }
+            else:
+                print(f"  Water availability batch {i//batch_size+1}: HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"  Erro water availability batch {i//batch_size+1}: {e}")
+
+    return result
+
+
+def fetch_forecast_batch(session: requests.Session, location_ids: list[int], batch_size: int = 20) -> dict:
+    """Fetch daily meteorological forecast for locations in batches."""
+    result = {}
+    for i in range(0, len(location_ids), batch_size):
+        batch = location_ids[i:i + batch_size]
+        ids_param = ",".join(str(lid) for lid in batch)
+        try:
+            resp = session.get(
+                f"{INFOHIDRO_BASE}/forecast/v1/forecastdata",
+                params={
+                    "summaryType": "daily",
+                    "source_ids": "22",
+                    "location_ids": ids_param,
+                },
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list):
+                    for d in data:
+                        lid = d.get("locationid") or d.get("location_id")
+                        if lid is not None:
+                            result[int(lid)] = {
+                                "temp_min": to_float(d.get("tempMin") or d.get("temp_min")),
+                                "temp_max": to_float(d.get("tempMax") or d.get("temp_max")),
+                                "umidade_min": to_float(d.get("umidadeMin") or d.get("humidity_min")),
+                                "umidade_max": to_float(d.get("umidadeMax") or d.get("humidity_max")),
+                                "chuva_mm": to_float(d.get("precipIntensity") or d.get("precip_intensity")),
+                                "prob_chuva": to_float(d.get("precipProbability") or d.get("precip_probability")),
+                                "vento_vel": to_float(d.get("windSpeed") or d.get("wind_speed")),
+                                "vento_rajada": to_float(d.get("windGust") or d.get("wind_gust")),
+                            }
+            else:
+                print(f"  Forecast batch {i//batch_size+1}: HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"  Erro forecast batch {i//batch_size+1}: {e}")
+
+    return result
+
+
+def parse_location_name(name: str) -> dict:
+    """Parse InfoHidro location name pattern: 'SIA - {code} - {municipio} - {sistema} - {rio}'."""
+    parts = [p.strip() for p in name.split(" - ")]
+    if len(parts) >= 5:
+        return {
+            "sia_code": parts[1],
+            "municipio": parts[2],
+            "sistema": parts[3],
+            "rio": parts[4],
+        }
+    if len(parts) >= 4:
+        return {
+            "sia_code": parts[1] if len(parts) > 1 else "",
+            "municipio": parts[2] if len(parts) > 2 else "",
+            "sistema": parts[3] if len(parts) > 3 else "",
+            "rio": "",
+        }
+    return {
+        "sia_code": "",
+        "municipio": name,
+        "sistema": "",
+        "rio": "",
+    }
+
+
+def fetch_mananciais(session: requests.Session) -> list[dict]:
+    """Fetch all 291 mananciais with water availability and meteo forecast data."""
+    # Step 1: Get fountain list from /Monitoring page
+    fountains = extract_fountains_from_monitoring(session)
+    if not fountains:
+        print("  Sem mananciais para processar")
+        return []
+
+    location_ids = [int(f["locationid"]) for f in fountains if "locationid" in f]
+    print(f"  {len(location_ids)} location IDs para buscar")
+
+    # Build lookup from fountains
+    fountain_map = {}
+    for f in fountains:
+        lid = f.get("locationid")
+        if lid is not None:
+            fountain_map[int(lid)] = f
+
+    # Step 2: Fetch water availability in batches
+    print("  Buscando disponibilidade hídrica em batch...")
+    water_data = fetch_water_availability_batch(session, location_ids)
+    print(f"  Disponibilidade: {len(water_data)} registros")
+
+    # Step 3: Fetch meteo forecast in batches
+    print("  Buscando previsão meteorológica em batch...")
+    meteo_data = fetch_forecast_batch(session, location_ids)
+    print(f"  Meteorologia: {len(meteo_data)} registros")
+
+    # Step 4: Assemble manancial records
+    mananciais = []
+    for lid in location_ids:
+        fountain = fountain_map.get(lid, {})
+        loc_name = fountain.get("locationname", "")
+        parsed = parse_location_name(loc_name)
+
+        water = water_data.get(lid, {})
+        meteo = meteo_data.get(lid, {})
+
+        q1 = water.get("q1")
+        q30 = water.get("q30")
+
+        # Determine availability status based on Q1/Q30 ratio
+        # Q1 is the 1st percentile flow — if current is below Q1, it's critical
+        vazao = None  # We don't have real-time flow from this API; will be null
+        disponibilidade = None
+        alerta = False
+
+        if q1 is not None and q30 is not None and q1 > 0:
+            ratio = q30 / q1 if q1 > 0 else None
+            if ratio is not None:
+                if ratio < 0.3:
+                    disponibilidade = "critico"
+                    alerta = True
+                elif ratio < 0.6:
+                    disponibilidade = "baixo"
+                    alerta = True
+                elif ratio < 0.9:
+                    disponibilidade = "normal"
+                else:
+                    disponibilidade = "alto"
+
+        # Extract latitude/longitude from fountain data if available
+        lat = to_float(fountain.get("latitude"))
+        lng = to_float(fountain.get("longitude"))
+
+        record = {
+            "locationid": lid,
+            "sia_code": parsed["sia_code"],
+            "municipio": parsed["municipio"],
+            "sistema": parsed["sistema"],
+            "rio": parsed["rio"],
+            "vazao_m3s": vazao,
+            "tendencia": None,
+            "disponibilidade": disponibilidade,
+            "q1": q1,
+            "q30": q30,
+            "alerta": alerta,
+            "chuva_mm": meteo.get("chuva_mm"),
+            "prob_chuva": meteo.get("prob_chuva"),
+            "temp_min": meteo.get("temp_min"),
+            "temp_max": meteo.get("temp_max"),
+            "umidade_min": meteo.get("umidade_min"),
+            "umidade_max": meteo.get("umidade_max"),
+            "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d"),
+        }
+
+        # Include coordinates for map layer (optional fields)
+        if lat is not None and lng is not None:
+            record["latitude"] = lat
+            record["longitude"] = lng
+
+        mananciais.append(record)
+
+    return mananciais
+
+
 def main():
     supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("=== ETL InfoHidro ===")
@@ -275,8 +517,8 @@ def main():
 
     session = create_session()
 
-    # 1. Reservatórios
-    print("1/3 Scraping reservatórios SAIC...")
+    # 1. Reservatórios SAIC
+    print("1/4 Scraping reservatórios SAIC...")
     try:
         reservatorios = scrape_reservatorios(session)
         if reservatorios:
@@ -290,8 +532,24 @@ def main():
         print(f"  ERRO reservatórios: {e}")
         results["reservatorios"] = f"ERRO: {e}"
 
-    # 2. Estações de telemetria
-    print("2/3 Buscando estações de telemetria...")
+    # 2. Mananciais (291 water sources statewide)
+    print("2/4 Buscando mananciais do Paraná...")
+    try:
+        mananciais = fetch_mananciais(session)
+        if mananciais:
+            upsert_cache(supabase_client, "infohidro_mananciais_pr", mananciais, "infohidro_monitoring")
+            results["mananciais"] = f"OK ({len(mananciais)} mananciais)"
+            em_alerta = sum(1 for m in mananciais if m.get("alerta"))
+            municipios = len(set(m.get("municipio", "") for m in mananciais))
+            print(f"  {len(mananciais)} mananciais, {em_alerta} em alerta, {municipios} municípios")
+        else:
+            results["mananciais"] = "SEM DADOS"
+    except Exception as e:
+        print(f"  ERRO mananciais: {e}")
+        results["mananciais"] = f"ERRO: {e}"
+
+    # 3. Estações de telemetria
+    print("3/4 Buscando estações de telemetria...")
     try:
         estacoes = fetch_estacoes(session)
         if estacoes:
@@ -303,10 +561,9 @@ def main():
         print(f"  ERRO estações: {e}")
         results["estacoes"] = f"ERRO: {e}"
 
-    # 3. Disponibilidade hídrica (sample locations)
-    print("3/3 Buscando disponibilidade hídrica...")
+    # 4. Disponibilidade hídrica (sample locations)
+    print("4/4 Buscando disponibilidade hídrica...")
     try:
-        # Known SAIC location IDs (from previous API exploration)
         sample_locations = ["1001", "1002", "1003", "1004", "1005"]
         disponibilidade = fetch_disponibilidade(session, sample_locations)
         if disponibilidade:
