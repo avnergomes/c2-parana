@@ -1,0 +1,36 @@
+# .github/workflows/cron-getec-atendimentos.yml
+# Budget: ~20 min/dia (1 exec × ~20 min — 399 municipalities)
+# Fonte: IDR-GETEC "Produtores Atendidos por Município" (PDF reports)
+name: ETL GETEC Atendimentos Diários
+
+on:
+  schedule:
+    - cron: '0 10 * * *'   # Diário às 10h UTC (7h BRT) — dados de ontem
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  etl-getec-atendimentos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r scripts/requirements.txt
+
+      - name: Executar ETL GETEC Atendimentos
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GETEC_USER: ${{ secrets.GETEC_USER }}
+          GETEC_PASS: ${{ secrets.GETEC_PASS }}
+        run: python scripts/etl_getec_atendimentos.py

@@ -1,6 +1,7 @@
 // src/components/getec/GetecMunicipios.tsx
 import { useState, useMemo } from 'react'
 import { formatNumber } from '@/lib/utils'
+import { useGetecAtendimentos } from '@/hooks/useGetec'
 import type { GetecMunicipio } from '@/types/getec'
 
 interface GetecMunicipiosProps {
@@ -8,10 +9,11 @@ interface GetecMunicipiosProps {
   loading: boolean
 }
 
-type SortKey = 'municipio' | 'total' | 'ativos' | 'inativos' | 'taxa_atividade' | 'masculino' | 'feminino'
+type SortKey = 'municipio' | 'total' | 'ativos' | 'inativos' | 'taxa_atividade' | 'masculino' | 'feminino' | 'atendimentos'
 
 const COLUMNS: { key: SortKey; label: string; align?: 'right' }[] = [
   { key: 'municipio', label: 'Município' },
+  { key: 'atendimentos', label: 'Atend. Dia', align: 'right' },
   { key: 'total', label: 'Total', align: 'right' },
   { key: 'ativos', label: 'Ativos', align: 'right' },
   { key: 'inativos', label: 'Inativos', align: 'right' },
@@ -21,6 +23,7 @@ const COLUMNS: { key: SortKey; label: string; align?: 'right' }[] = [
 ]
 
 export function GetecMunicipios({ municipios, loading }: GetecMunicipiosProps) {
+  const { data: atendimentosMap } = useGetecAtendimentos()
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('total')
   const [sortAsc, setSortAsc] = useState(false)
@@ -32,6 +35,11 @@ export function GetecMunicipios({ municipios, loading }: GetecMunicipiosProps) {
       : municipios
 
     return [...list].sort((a, b) => {
+      if (sortKey === 'atendimentos') {
+        const av = atendimentosMap?.[a.municipio_code]?.dia ?? 0
+        const bv = atendimentosMap?.[b.municipio_code]?.dia ?? 0
+        return sortAsc ? av - bv : bv - av
+      }
       const av = a[sortKey]
       const bv = b[sortKey]
       if (typeof av === 'string' && typeof bv === 'string') {
@@ -39,7 +47,7 @@ export function GetecMunicipios({ municipios, loading }: GetecMunicipiosProps) {
       }
       return sortAsc ? (av as number) - (bv as number) : (bv as number) - (av as number)
     })
-  }, [municipios, search, sortKey, sortAsc])
+  }, [municipios, search, sortKey, sortAsc, atendimentosMap])
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -94,6 +102,15 @@ export function GetecMunicipios({ municipios, loading }: GetecMunicipiosProps) {
             {filtered.map(m => (
               <tr key={m.municipio_code} className="border-b border-border/50 hover:bg-background-elevated/50 transition-colors">
                 <td className="px-4 py-2.5 text-text-primary">{m.municipio}</td>
+                <td className="px-4 py-2.5 text-right font-mono">
+                  {atendimentosMap?.[m.municipio_code] != null ? (
+                    <span className={atendimentosMap[m.municipio_code].dia > 0 ? 'text-accent-green' : 'text-text-muted'}>
+                      {formatNumber(atendimentosMap[m.municipio_code].dia)}
+                    </span>
+                  ) : (
+                    <span className="text-text-muted">—</span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5 text-right font-mono text-text-primary">{formatNumber(m.total)}</td>
                 <td className="px-4 py-2.5 text-right font-mono text-status-success">{formatNumber(m.ativos)}</td>
                 <td className="px-4 py-2.5 text-right font-mono text-text-muted">{formatNumber(m.inativos)}</td>
