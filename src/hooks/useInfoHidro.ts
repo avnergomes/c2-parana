@@ -1,4 +1,5 @@
 // src/hooks/useInfoHidro.ts
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import type {
@@ -6,6 +7,7 @@ import type {
   EstacaoTelemetria,
   DisponibilidadeHidrica,
 } from '@/types/infohidro'
+import type { Manancial, ManancialKpis } from '@/types/manancial'
 
 // Type for data_cache table results
 interface DataCacheRow {
@@ -86,4 +88,49 @@ export function useReservatorioKpis() {
     },
     isLoading,
   }
+}
+
+export function useMananciais() {
+  return useQuery({
+    queryKey: ['infohidro-mananciais'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('data_cache')
+        .select('data, fetched_at')
+        .eq('cache_key', 'infohidro_mananciais_pr')
+        .single() as { data: DataCacheRow | null }
+
+      const cached = data?.data as { items?: Manancial[] } | Manancial[] | null
+      return Array.isArray(cached) ? cached : (cached?.items || [])
+    },
+    staleTime: 1000 * 60 * 60, // 1h
+  })
+}
+
+export function useManancialKpis(): { data: ManancialKpis | null; isLoading: boolean } {
+  const { data: mananciais, isLoading } = useMananciais()
+
+  const kpis = useMemo(() => {
+    if (!mananciais?.length) return null
+
+    const emAlerta = mananciais.filter(m => m.alerta).length
+    const municipios = new Set(mananciais.map(m => m.municipio)).size
+
+    const dispCounts: Record<string, number> = {}
+    for (const m of mananciais) {
+      const d = m.disponibilidade ?? 'desconhecido'
+      dispCounts[d] = (dispCounts[d] || 0) + 1
+    }
+    const dispMedia = Object.entries(dispCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'N/D'
+
+    return {
+      total_mananciais: mananciais.length,
+      em_alerta: emAlerta,
+      disponibilidade_media: dispMedia,
+      municipios_monitorados: municipios,
+      data_referencia: mananciais[0]?.ultima_atualizacao ?? '',
+    }
+  }, [mananciais])
+
+  return { data: kpis, isLoading }
 }
