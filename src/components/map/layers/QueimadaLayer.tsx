@@ -1,4 +1,5 @@
 // src/components/map/layers/QueimadaLayer.tsx
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CircleMarker, Tooltip } from 'react-leaflet'
 import { supabase } from '@/lib/supabase'
@@ -11,6 +12,10 @@ interface FireSpot {
   municipality: string | null
   satellite: string | null
   confidence: string | null
+}
+
+interface QueimadaLayerProps {
+  timeFilter?: string // ISO string — only show spots on or before this date
 }
 
 function brightnessToRadius(brightness: number | null): number {
@@ -28,7 +33,7 @@ function brightnessToOpacity(brightness: number | null): number {
   return 0.7
 }
 
-export function QueimadaLayer() {
+export function QueimadaLayer({ timeFilter }: QueimadaLayerProps) {
   const { data: fires } = useQuery({
     queryKey: ['fire-spots-map'],
     queryFn: async () => {
@@ -43,9 +48,17 @@ export function QueimadaLayer() {
     staleTime: 1000 * 60 * 30,
   })
 
+  // Filter by timeline position: only show spots acquired on or before the selected date
+  const filtered = useMemo(() => {
+    if (!fires) return []
+    if (!timeFilter) return fires
+    const cutoff = timeFilter.split('T')[0] // YYYY-MM-DD
+    return fires.filter(f => !f.acq_date || f.acq_date <= cutoff)
+  }, [fires, timeFilter])
+
   return (
     <>
-      {fires?.map((fire) => {
+      {filtered.map((fire) => {
         const radius = brightnessToRadius(fire.brightness)
         const opacity = brightnessToOpacity(fire.brightness)
 

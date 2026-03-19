@@ -139,23 +139,15 @@ export function TimelineSlider({
             </div>
 
             {/* Tick marks */}
-            <div className="relative h-5">
+            <div className="relative h-4">
               {tickMarks.map((tick) => (
-                <div key={tick.label} className="absolute flex flex-col items-center">
-                  {/* Tick line */}
-                  <div
-                    className="w-0.5 h-1.5 bg-[#4b5563] mb-0.5"
-                    style={{ left: `calc(${tick.position}% - 1px)` }}
-                  />
-                  {/* Tick label */}
-                  <span
-                    className="text-xs text-[#9ca3af] whitespace-nowrap"
-                    style={{
-                      left: `calc(${tick.position}% - 18px)`,
-                      position: 'absolute',
-                      top: '4px',
-                    }}
-                  >
+                <div
+                  key={tick.label}
+                  className="absolute flex flex-col items-center"
+                  style={{ left: `${tick.position * 100}%`, transform: 'translateX(-50%)' }}
+                >
+                  <div className="w-px h-1.5 bg-[#4b5563]" />
+                  <span className="text-[10px] text-[#9ca3af] whitespace-nowrap mt-0.5">
                     {tick.label}
                   </span>
                 </div>
