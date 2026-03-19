@@ -1,8 +1,9 @@
 // src/hooks/useCOP.ts
 import { useMemo } from 'react'
 import { useIRTC } from './useIRTC'
-import { useAlertasINMET } from './useClima'
-import { useEstacoesPR } from './useClima'
+import { useAlertasINMET, useEstacoesPR } from './useClima'
+import { useFireSpots, useRiverLevels, useAirQuality } from './useAmbiente'
+import { useDengueAtual } from './useSaude'
 
 interface FiresData {
   total: number
@@ -17,8 +18,6 @@ interface DengueData {
 interface RiversData {
   count: number
 }
-
-
 
 interface AirQualityData {
   aqi: number
@@ -51,83 +50,68 @@ export interface COPData {
   lastUpdate: string | null
 }
 
-/**
- * Aggregates data from all hooks to provide a unified COP (Common Operating Picture) view.
- * In a real implementation, you would aggregate actual data from the hooks.
- * This is a placeholder that structures the expected data format.
- */
 export function useCOP(): COPData {
   const irtc = useIRTC()
   const inmet = useAlertasINMET()
   const estacoes = useEstacoesPR()
+  const fireSpots = useFireSpots(1)
+  const rivers = useRiverLevels()
+  const airQuality = useAirQuality()
+  const dengue = useDengueAtual()
 
-  // Process and aggregate data
-  const processedData = useMemo(() => {
+  return useMemo(() => {
     const now = new Date().toISOString()
 
-    // IRTC data
-    const irtcSummary = {
-      data: irtc.data,
-      isLoading: irtc.isLoading,
-    }
-
-    // INMET alerts
-    const inmetAlerts = {
-      data: inmet.data || [],
-      isLoading: inmet.isLoading,
-    }
-
-    // Fires data (placeholder - would come from a useQueimadas hook)
+    // Fires: count spots from last 24h
+    const firesTotalRaw = fireSpots.data?.length ?? 0
     const firesFires24h: FiresData = {
-      total: 0,
-      trend: 'stable',
+      total: firesTotalRaw,
+      trend: firesTotalRaw > 50 ? 'up' : firesTotalRaw > 0 ? 'stable' : 'down',
     }
 
-    // Dengue data (placeholder - would come from a useDengue hook)
+    // Dengue: count municipalities with alert_level >= 2
+    const dengueAlertCount = dengue.data?.filter(
+      (d: any) => (d.alert_level ?? 0) >= 2
+    ).length ?? 0
     const dengueAlertMunicipalities: DengueData = {
-      count: 0,
-      trend: 'stable',
+      count: dengueAlertCount,
+      trend: dengueAlertCount > 10 ? 'up' : dengueAlertCount > 0 ? 'stable' : 'down',
     }
 
-    // Rivers data (placeholder - would come from a useRios hook)
-    const riversAlert: RiversData = {
-      count: 0,
-    }
+    // Rivers: count stations not at 'normal'
+    const riversAlertCount = rivers.data?.filter(
+      (r: any) => r.alert_level && r.alert_level !== 'normal'
+    ).length ?? 0
+    const riversAlert: RiversData = { count: riversAlertCount }
 
-    // Weather stations
-    const weatherStations = {
-      data: estacoes.data || [],
-      isLoading: estacoes.isLoading,
-    }
+    // Air quality: find worst AQI
+    const worstAir = airQuality.data?.reduce<AirQualityData | null>((worst, station: any) => {
+      const aqi = station.aqi ?? 0
+      if (!worst || aqi > worst.aqi) {
+        return { aqi, city: station.city || station.station_name || '?' }
+      }
+      return worst
+    }, null) ?? null
 
-    // Air quality (placeholder - would process from climate data)
-    const worstAirQuality: AirQualityData | null = estacoes.data
-      ? {
-          aqi: 75, // placeholder
-          city: 'Curitiba',
-        }
-      : null
-
-    // Extreme temperature
-    const extremeTemperature: TemperatureData | null = estacoes.data
-      ? {
-          max: 32.5,
-          station: 'Curitiba',
-        }
-      : null
+    // Temperature: find max from weather stations
+    const extremeTemp = estacoes.data?.reduce<TemperatureData | null>((max, s: any) => {
+      const temp = s.temperature ?? s.temp_max ?? null
+      if (temp != null && (!max || temp > max.max)) {
+        return { max: temp, station: s.station_name || s.city || '?' }
+      }
+      return max
+    }, null) ?? null
 
     return {
-      irtcSummary,
-      inmetAlerts,
+      irtcSummary: { data: irtc.data, isLoading: irtc.isLoading },
+      inmetAlerts: { data: inmet.data || [], isLoading: inmet.isLoading },
       firesFires24h,
       dengueAlertMunicipalities,
       riversAlert,
-      weatherStations,
-      worstAirQuality,
-      extremeTemperature,
+      weatherStations: { data: estacoes.data || [], isLoading: estacoes.isLoading },
+      worstAirQuality: worstAir,
+      extremeTemperature: extremeTemp,
       lastUpdate: now,
     }
-  }, [irtc, inmet, estacoes])
-
-  return processedData
+  }, [irtc, inmet, estacoes, fireSpots.data, rivers.data, airQuality.data, dengue.data])
 }
