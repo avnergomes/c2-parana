@@ -107,7 +107,7 @@ export function COPStatusPanel({ onMunicipalityClick: _onMunicipalityClick }: CO
 
   return (
     <div
-      className="absolute right-2 top-2 flex flex-col bg-card/90 backdrop-blur rounded-lg border border-gray-700 shadow-lg"
+      className="absolute right-2 top-2 z-[1000] flex flex-col bg-card/90 backdrop-blur rounded-lg border border-gray-700 shadow-lg"
       style={{
         width: '320px',
         maxHeight: 'calc(100vh - 80px)',
