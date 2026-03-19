@@ -11,6 +11,7 @@ import { QueimadaLayer } from './layers/QueimadaLayer'
 import { DengueLayer } from './layers/DengueLayer'
 import { VbpLayer } from './layers/VbpLayer'
 import { CreditoRuralLayer } from './layers/CreditoRuralLayer'
+import { RiosLayer } from './layers/RiosLayer'
 import { ReservatoriosLayer } from './layers/ReservatoriosLayer'
 import { ManancialAlertsLayer } from './layers/ManancialAlertsLayer'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
@@ -172,6 +173,13 @@ export function MapModule() {
           {activeLayers.includes('clima') && (
             <ErrorBoundary moduleName="layer clima">
               <ClimaLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Rios (marcadores de estações fluviométricas) */}
+          {activeLayers.includes('rios') && isPro && (
+            <ErrorBoundary moduleName="layer rios">
+              <RiosLayer />
             </ErrorBoundary>
           )}
 
