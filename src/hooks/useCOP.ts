@@ -18,10 +18,7 @@ interface RiversData {
   count: number
 }
 
-interface WeatherStationData {
-  count: number
-  online: number
-}
+
 
 interface AirQualityData {
   aqi: number
