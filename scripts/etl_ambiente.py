@@ -4,6 +4,8 @@
 import os
 import io
 import csv
+import json
+import time
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
@@ -35,11 +37,117 @@ CIDADES_AR_GEO = {
     "foz": {"lat": -25.52, "lon": -54.59},
 }
 
+# Município centroides para mapeamento de focos de incêndio por proximidade
+MUNICIPIOS_PR_CENTROIDES = {
+    "Curitiba": {"lat": -25.4284, "lon": -49.2733},
+    "Londrina": {"lat": -23.3100, "lon": -51.1624},
+    "Maringá": {"lat": -23.4250, "lon": -51.9386},
+    "Foz do Iguaçu": {"lat": -25.5951, "lon": -54.5838},
+    "São José dos Pinhais": {"lat": -25.5307, "lon": -49.2000},
+    "Pinhais": {"lat": -25.3914, "lon": -49.0970},
+    "Almirante Tamandaré": {"lat": -25.5169, "lon": -49.0758},
+    "Colombo": {"lat": -25.2928, "lon": -49.2174},
+    "Araucária": {"lat": -25.5729, "lon": -49.4281},
+    "Piraquara": {"lat": -25.4797, "lon": -48.9933},
+    "Campo Largo": {"lat": -25.4501, "lon": -49.5147},
+    "Apucarana": {"lat": -23.5707, "lon": -51.4635},
+    "Arapongas": {"lat": -23.4186, "lon": -51.4300},
+    "Cambé": {"lat": -23.2628, "lon": -51.1258},
+    "Cornélio Procópio": {"lat": -23.1871, "lon": -50.6475},
+    "Cascavel": {"lat": -24.9545, "lon": -53.4596},
+    "Toledo": {"lat": -24.7257, "lon": -53.7406},
+    "Paranaguá": {"lat": -25.5169, "lon": -48.7296},
+    "Guaratuba": {"lat": -26.2353, "lon": -48.7889},
+    "Ponta Grossa": {"lat": -25.0959, "lon": -50.1647},
+}
+
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """Calcula distância em km entre dois pontos lat/lon."""
+    from math import radians, cos, sin, asin, sqrt
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * asin(sqrt(a))
+    r = 6371
+    return c * r
+
+
+def find_nearest_municipality(lat, lon, max_distance_km=50):
+    """Encontra o município mais próximo para um foco de incêndio."""
+    nearest = None
+    min_distance = float('inf')
+    for municipio, coords in MUNICIPIOS_PR_CENTROIDES.items():
+        dist = haversine_distance(lat, lon, coords["lat"], coords["lon"])
+        if dist < min_distance and dist <= max_distance_km:
+            min_distance = dist
+            nearest = municipio
+    return nearest
+
+
+def request_with_retry(url, method='GET', max_retries=3, timeout=30, **kwargs):
+    """
+    Faz requisição HTTP com retry exponencial.
+
+    Args:
+        url: URL a requisitar
+        method: 'GET' ou 'POST'
+        max_retries: máximo de tentativas
+        timeout: timeout em segundos
+        **kwargs: argumentos adicionais para requests (json, data, headers, etc)
+
+    Returns:
+        Response object se bem-sucedido, None se falhar após retries
+    """
+    base_delay = 1  # segundo inicial
+    for attempt in range(max_retries):
+        try:
+            if method.upper() == 'GET':
+                resp = requests.get(url, timeout=timeout, **kwargs)
+            elif method.upper() == 'POST':
+                resp = requests.post(url, timeout=timeout, **kwargs)
+            else:
+                raise ValueError(f"Método HTTP não suportado: {method}")
+
+            # Sucesso
+            if resp.status_code < 500:
+                return resp
+
+            # Erro 5xx - pode fazer retry
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"    HTTP {resp.status_code}, retry em {delay}s (tentativa {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                continue
+            else:
+                print(f"    HTTP {resp.status_code} após {max_retries} tentativas")
+                return resp
+
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"    Timeout/conexão, retry em {delay}s: {e}")
+                time.sleep(delay)
+                continue
+            else:
+                print(f"    Falha de conexão após {max_retries} tentativas: {e}")
+                return None
+        except Exception as e:
+            print(f"    Erro inesperado: {e}")
+            return None
+
+    return None
+
 def fetch_firms():
-    """Busca focos de calor VIIRS SNPP do NASA FIRMS."""
+    """Busca focos de calor VIIRS SNPP do NASA FIRMS com retry."""
     url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_KEY}/VIIRS_SNPP_NRT/{PR_BBOX}/1"
     try:
-        resp = requests.get(url, timeout=60)
+        resp = request_with_retry(url, method='GET', max_retries=3, timeout=60)
+
+        if resp is None:
+            print(f"  Falha ao conectar FIRMS após retries")
+            return []
 
         if resp.status_code in (403, 429):
             print(f"  FIRMS retornou {resp.status_code} - limite de API atingido")
@@ -53,9 +161,13 @@ def fetch_firms():
         spots = []
         for row in reader:
             try:
+                lat = float(row.get("latitude", 0))
+                lon = float(row.get("longitude", 0))
+                municipio = find_nearest_municipality(lat, lon)
                 spots.append({
-                    "latitude": float(row.get("latitude", 0)),
-                    "longitude": float(row.get("longitude", 0)),
+                    "latitude": lat,
+                    "longitude": lon,
+                    "municipality": municipio,
                     "brightness": float(row.get("bright_ti4", 0)) if row.get("bright_ti4") else None,
                     "scan": float(row.get("scan", 0)) if row.get("scan") else None,
                     "track": float(row.get("track", 0)) if row.get("track") else None,
@@ -92,15 +204,20 @@ def _parse_aqicn_data(city_id, data):
 
 
 def _try_aqicn_feed(feed_path, token):
-    """Tenta buscar dados WAQI por feed path. Retorna (data_dict, None) ou (None, erro_msg)."""
+    """Tenta buscar dados WAQI por feed path com retry. Retorna (data_dict, None) ou (None, erro_msg)."""
     url = f"https://api.waqi.info/feed/{feed_path}/?token={token}"
-    resp = requests.get(url, timeout=15)
-    data = resp.json()
-    status = data.get("status")
-    if status != "ok":
-        msg = data.get("data") or data.get("message") or "unknown"
-        return None, f"status={status} msg={msg}"
-    return data, None
+    resp = request_with_retry(url, method='GET', max_retries=3, timeout=15)
+    if resp is None:
+        return None, "Falha de conexão após retries"
+    try:
+        data = resp.json()
+        status = data.get("status")
+        if status != "ok":
+            msg = data.get("data") or data.get("message") or "unknown"
+            return None, f"status={status} msg={msg}"
+        return data, None
+    except Exception as e:
+        return None, f"Erro ao parsear JSON: {e}"
 
 
 def fetch_aqicn():
@@ -174,8 +291,51 @@ def get_alert_level(station_code: str, level_cm: float) -> str:
     return "normal"
 
 
+def _parse_ana_xml_robust(xml_content):
+    """
+    Parse XML ANA de forma robusta, tratando diferentes namespaces e formatos.
+    Retorna (dados_list, None) se sucesso ou (None, erro_msg) se falha.
+    """
+    try:
+        # Verificar se é realmente XML
+        if not xml_content.strip().startswith(b'<'):
+            # Provavelmente HTML de erro
+            return None, "Resposta não é XML (provavelmente HTML de erro)"
+
+        root = ET.fromstring(xml_content)
+    except ET.ParseError as e:
+        return None, f"XML malformado: {e}"
+    except Exception as e:
+        return None, f"Erro ao fazer parse XML: {e}"
+
+    # Tentar diferentes patterns de namespace
+    namespace_patterns = [
+        './/DadosHidrometereologicos',  # Sem namespace
+        './/{http://www.ana.gov.br/}DadosHidrometereologicos',  # Com namespace
+    ]
+
+    dados = None
+    for pattern in namespace_patterns:
+        dados = root.findall(pattern)
+        if dados:
+            break
+
+    if not dados:
+        # Fallback: procurar qualquer elemento com "Dados" no nome
+        for elem in root.iter():
+            if 'Dados' in elem.tag:
+                # Tentar usar este elemento
+                dados = [elem]
+                break
+
+    if not dados:
+        return None, "Nenhum elemento de dados encontrado no XML"
+
+    return dados, None
+
+
 def fetch_ana_rivers():
-    """Busca dados telemétricos de rios do PR via API SAR/ANA."""
+    """Busca dados telemétricos de rios do PR via API SAR/ANA com retry e parsing robusto."""
     records = []
 
     for est in ESTACOES_RIOS_PR:
@@ -185,44 +345,78 @@ def fetch_ana_rivers():
             date_start = (now - timedelta(days=1)).strftime("%d/%m/%Y")
 
             url = f"https://telemetriaws1.ana.gov.br/ServiceANA.asmx/DadosHidrometeorologicos?codEstacao={est['code']}&dataInicio={date_start}&dataFim={date_end}"
-            resp = requests.get(url, timeout=30)
+            resp = request_with_retry(url, method='GET', max_retries=3, timeout=30)
+
+            if resp is None:
+                print(f"  Estação {est['code']}: Falha de conexão após retries")
+                records.append({
+                    "station_code": est["code"],
+                    "station_name": est["name"],
+                    "river_name": est["river"],
+                    "municipality": est["municipality"],
+                    "latitude": est.get("lat"),
+                    "longitude": est.get("lon"),
+                    "level_cm": None,
+                    "flow_m3s": None,
+                    "alert_level": "normal",
+                    "observed_at": datetime.now().isoformat(),
+                })
+                continue
 
             if resp.status_code != 200:
                 print(f"  Estação {est['code']}: HTTP {resp.status_code}")
+                records.append({
+                    "station_code": est["code"],
+                    "station_name": est["name"],
+                    "river_name": est["river"],
+                    "municipality": est["municipality"],
+                    "latitude": est.get("lat"),
+                    "longitude": est.get("lon"),
+                    "level_cm": None,
+                    "flow_m3s": None,
+                    "alert_level": "normal",
+                    "observed_at": datetime.now().isoformat(),
+                })
                 continue
 
-            # Parse XML
-            root = ET.fromstring(resp.content)
-
-            # Buscar dados - tentar diferentes paths
-            dados = root.findall('.//DadosHidrometereologicos')
-            if not dados:
-                dados = root.findall('.//{http://www.ana.gov.br/}DadosHidrometereologicos')
-            if not dados:
-                # Tentar buscar qualquer elemento com dados
-                for elem in root.iter():
-                    if 'Nivel' in elem.tag or 'nivel' in elem.tag.lower():
-                        nivel_val = elem.text
-                        if nivel_val:
-                            records.append({
-                                "station_code": est["code"],
-                                "station_name": est["name"],
-                                "river_name": est["river"],
-                                "municipality": est["municipality"],
-                                "latitude": est.get("lat"),
-                                "longitude": est.get("lon"),
-                                "level_cm": float(nivel_val) if nivel_val.strip() else None,
-                                "flow_m3s": None,
-                                "alert_level": get_alert_level(est["code"], float(nivel_val) if nivel_val.strip() else None),
-                                "observed_at": now.isoformat(),
-                            })
-                            break
+            # Parse XML robusto
+            dados, err = _parse_ana_xml_robust(resp.content)
+            if dados is None:
+                print(f"  Estação {est['code']}: Parse XML falhou - {err}")
+                records.append({
+                    "station_code": est["code"],
+                    "station_name": est["name"],
+                    "river_name": est["river"],
+                    "municipality": est["municipality"],
+                    "latitude": est.get("lat"),
+                    "longitude": est.get("lon"),
+                    "level_cm": None,
+                    "flow_m3s": None,
+                    "alert_level": "normal",
+                    "observed_at": datetime.now().isoformat(),
+                })
                 continue
 
             # Pegar último registro (mais recente)
+            if not dados:
+                print(f"  Estação {est['code']}: Nenhum dado disponível")
+                records.append({
+                    "station_code": est["code"],
+                    "station_name": est["name"],
+                    "river_name": est["river"],
+                    "municipality": est["municipality"],
+                    "latitude": est.get("lat"),
+                    "longitude": est.get("lon"),
+                    "level_cm": None,
+                    "flow_m3s": None,
+                    "alert_level": "normal",
+                    "observed_at": datetime.now().isoformat(),
+                })
+                continue
+
             ultimo = dados[-1]
 
-            # Tentar diferentes formatos de tag
+            # Tentar diferentes formatos de tag (com/sem namespace)
             nivel = None
             vazao = None
             data_hora = None
@@ -271,10 +465,47 @@ def fetch_ana_rivers():
     print(f"ANA: {len(records)} estações coletadas")
     return records
 
+def _try_upsert_with_fallback(supabase, table_name, records, conflict_field):
+    """
+    Tenta upsert, e se falhar com constraint error, faz delete+insert.
+    """
+    try:
+        supabase.table(table_name).upsert(
+            records,
+            on_conflict=conflict_field
+        ).execute()
+        return True, None
+    except Exception as e:
+        error_str = str(e)
+        if "no unique or exclusion constraint" in error_str or "constraint" in error_str.lower():
+            # Constraint não existe ou diferente - fazer delete+insert
+            try:
+                if table_name == "fire_spots":
+                    cutoff = (datetime.now() - timedelta(days=1)).date().isoformat()
+                    supabase.table(table_name).delete().gte("acq_date", cutoff).execute()
+                elif table_name == "air_quality":
+                    for rec in records:
+                        supabase.table(table_name).delete().eq("city", rec["city"]).execute()
+                elif table_name == "river_levels":
+                    for rec in records:
+                        supabase.table(table_name).delete().eq("station_code", rec["station_code"]).execute()
+
+                supabase.table(table_name).insert(records).execute()
+                return True, "upsert_fallback"
+            except Exception as e2:
+                return False, f"Delete+insert falhou: {e2}"
+        else:
+            return False, str(e)
+
+
 def main():
+    start_time = datetime.now()
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     errors = []
+    firms_count = 0
+    aqicn_count = 0
+    ana_count = 0
 
     # === NASA FIRMS ===
     print("=" * 40)
@@ -285,26 +516,21 @@ def main():
             print("  Obtenha sua key em: https://firms.modaps.eosdis.nasa.gov/api/area/")
 
         spots = fetch_firms()
+        firms_count = len(spots)
         if spots:
-            try:
-                supabase.table("fire_spots").upsert(
-                    spots,
-                    on_conflict="latitude,longitude,acq_date"
-                ).execute()
-                print(f"  {len(spots)} focos inseridos/atualizados")
-            except Exception as e:
-                if "no unique or exclusion constraint" in str(e):
-                    # Fallback: deletar focos recentes e inserir novos
-                    cutoff = (datetime.now() - timedelta(days=1)).date().isoformat()
-                    supabase.table("fire_spots").delete().gte("acq_date", cutoff).execute()
-                    supabase.table("fire_spots").insert(spots).execute()
-                    print(f"  {len(spots)} focos inseridos (sem upsert)")
-                else:
-                    raise
+            success, msg = _try_upsert_with_fallback(supabase, "fire_spots", spots, "latitude,longitude,acq_date")
+            if success:
+                print(f"  {len(spots)} focos inseridos/atualizados {f'({msg})' if msg else ''}")
+            else:
+                print(f"  ERRO ao inserir focos: {msg}")
+                errors.append(f"FIRMS insert: {msg}")
 
             # Limpar focos com mais de 30 dias
-            cutoff = (datetime.now() - timedelta(days=30)).date().isoformat()
-            supabase.table("fire_spots").delete().lt("acq_date", cutoff).execute()
+            try:
+                cutoff = (datetime.now() - timedelta(days=30)).date().isoformat()
+                supabase.table("fire_spots").delete().lt("acq_date", cutoff).execute()
+            except Exception as e:
+                print(f"  Aviso ao limpar focos antigos: {e}")
         else:
             print("  Nenhum foco encontrado (pode ser periodo sem queimadas)")
     except Exception as e:
@@ -320,22 +546,14 @@ def main():
             print("  Obtenha seu token em: https://aqicn.org/data-platform/token/")
 
         aq_records = fetch_aqicn()
+        aqicn_count = len(aq_records)
         if aq_records:
-            try:
-                supabase.table("air_quality").upsert(
-                    aq_records,
-                    on_conflict="city"
-                ).execute()
-                print(f"  {len(aq_records)} cidades atualizadas")
-            except Exception as e:
-                if "no unique or exclusion constraint" in str(e):
-                    # Fallback: deletar e inserir
-                    for rec in aq_records:
-                        supabase.table("air_quality").delete().eq("city", rec["city"]).execute()
-                    supabase.table("air_quality").insert(aq_records).execute()
-                    print(f"  {len(aq_records)} cidades inseridas (sem upsert)")
-                else:
-                    raise
+            success, msg = _try_upsert_with_fallback(supabase, "air_quality", aq_records, "city")
+            if success:
+                print(f"  {len(aq_records)} cidades atualizadas {f'({msg})' if msg else ''}")
+            else:
+                print(f"  ERRO ao atualizar qualidade do ar: {msg}")
+                errors.append(f"AQICN insert: {msg}")
     except Exception as e:
         print(f"  ERRO AQICN: {e}")
         errors.append(f"AQICN: {e}")
@@ -345,25 +563,58 @@ def main():
     print("3/3 Buscando nivel dos rios ANA...")
     try:
         rivers = fetch_ana_rivers()
+        ana_count = len(rivers)
         if rivers:
-            try:
-                supabase.table("river_levels").upsert(
-                    rivers,
-                    on_conflict="station_code"
-                ).execute()
-                print(f"  {len(rivers)} estacoes atualizadas")
-            except Exception as e:
-                if "no unique or exclusion constraint" in str(e):
-                    # Fallback: deletar e inserir
-                    for station in ESTACOES_RIOS_PR:
-                        supabase.table("river_levels").delete().eq("station_code", station["code"]).execute()
-                    supabase.table("river_levels").insert(rivers).execute()
-                    print(f"  {len(rivers)} estacoes inseridas (sem upsert)")
-                else:
-                    raise
+            success, msg = _try_upsert_with_fallback(supabase, "river_levels", rivers, "station_code")
+            if success:
+                print(f"  {len(rivers)} estacoes atualizadas {f'({msg})' if msg else ''}")
+            else:
+                print(f"  ERRO ao atualizar níveis dos rios: {msg}")
+                errors.append(f"ANA insert: {msg}")
     except Exception as e:
         print(f"  ERRO ANA: {e}")
         errors.append(f"ANA: {e}")
+
+    # === ETL Health Tracking ===
+    print("=" * 40)
+    print("Registrando saúde da ETL...")
+    try:
+        duration = (datetime.now() - start_time).total_seconds()
+        status = "error" if len(errors) > 0 else "success"
+        if len(errors) > 0 and (firms_count > 0 or aqicn_count > 0 or ana_count > 0):
+            status = "partial"
+
+        health_record = {
+            "key": "etl_health_ambiente",
+            "value": {
+                "last_run": start_time.isoformat(),
+                "status": status,
+                "firms_spots": firms_count,
+                "aqicn_cities": aqicn_count,
+                "ana_stations": ana_count,
+                "duration_seconds": duration,
+                "errors": errors,
+            },
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        # Tentar upsert
+        try:
+            supabase.table("data_cache").upsert(
+                health_record,
+                on_conflict="key"
+            ).execute()
+        except Exception as e:
+            if "no unique or exclusion constraint" in str(e):
+                # Fallback: deletar antigo e inserir novo
+                supabase.table("data_cache").delete().eq("key", "etl_health_ambiente").execute()
+                supabase.table("data_cache").insert(health_record).execute()
+            else:
+                raise
+
+        print(f"  Health record registrado: status={status}, duration={duration:.1f}s")
+    except Exception as e:
+        print(f"  Aviso ao registrar health: {e}")
 
     # === Resumo ===
     print("=" * 40)

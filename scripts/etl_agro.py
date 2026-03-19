@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""ETL Agro: VBP + ComexStat + Emprego + Crédito Rural."""
+"""ETL Agro: VBP + ComexStat + Emprego + Crédito Rural with health tracking."""
 
 import os
 import json
+import time
 import requests
 from datetime import datetime, timedelta
 from supabase import create_client
@@ -12,6 +13,49 @@ load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+
+def request_with_retry(method: str, url: str, max_retries: int = 3, timeout: int = 60, **kwargs) -> dict | list | None:
+    """Reusable HTTP request with exponential backoff retry.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        url: API URL to request
+        max_retries: Number of retry attempts
+        timeout: Request timeout in seconds (default 60s, max for GitHub Actions)
+        **kwargs: Additional requests.request arguments (json, params, etc.)
+
+    Returns:
+        Parsed JSON response or None if all retries fail
+    """
+    for attempt in range(max_retries):
+        try:
+            resp = requests.request(method, url, timeout=timeout, **kwargs)
+
+            if resp.status_code == 200:
+                return resp.json()
+
+            if resp.status_code in (429, 500, 502, 503, 504):
+                wait = 2 ** attempt
+                print(f"    HTTP {resp.status_code}, retry {attempt+1}/{max_retries}. Waiting {wait}s...")
+                time.sleep(wait)
+                continue
+
+            print(f"    HTTP {resp.status_code}")
+            return None
+
+        except requests.exceptions.Timeout:
+            print(f"    Timeout, retry {attempt+1}/{max_retries}")
+            time.sleep(1)
+        except requests.exceptions.ConnectionError:
+            print(f"    Connection error, retry {attempt+1}/{max_retries}")
+            time.sleep(2)
+        except Exception as e:
+            print(f"    Unexpected error: {e}")
+            return None
+
+    print(f"    All {max_retries} retries failed")
+    return None
 
 
 def upsert_cache(supabase, cache_key: str, data, source: str):
@@ -28,6 +72,16 @@ def upsert_cache(supabase, cache_key: str, data, source: str):
     }, on_conflict="cache_key").execute()
 
 
+def upsert_health(supabase, health_data: dict):
+    """Upsert ETL health tracking to data_cache."""
+    supabase.table("data_cache").upsert({
+        "cache_key": "etl_health_agro",
+        "data": health_data,
+        "source": "etl_health",
+        "fetched_at": datetime.now().isoformat(),
+    }, on_conflict="cache_key").execute()
+
+
 def fetch_vbp_sidra():
     """Busca VBP do IBGE SIDRA - Producao Agricola Municipal."""
     try:
@@ -35,19 +89,21 @@ def fetch_vbp_sidra():
         # n3/41 = estado Parana (mais eficiente que n6/all que pega todos municipios do Brasil)
         # v=214 = valor da producao, p=last 1 = ultimo periodo
         url = "https://apisidra.ibge.gov.br/values/t/5457/n3/41/v/214/p/last%201/c782/0"
-        resp = requests.get(url, timeout=90)  # Timeout mais generoso
+        resp = request_with_retry("GET", url, max_retries=3, timeout=60)
 
-        if resp.status_code != 200:
-            print(f"  SIDRA retornou {resp.status_code}, usando dados fallback")
+        if resp is None:
+            print("  SIDRA returned no data, using fallback")
             return get_vbp_fallback()
 
-        data = resp.json()
+        if not isinstance(resp, list) or len(resp) < 2:
+            print("  SIDRA invalid response format, using fallback")
+            return get_vbp_fallback()
 
         # Filtrar apenas Paraná (municípios que começam com 41)
-        pr_data = [r for r in data[1:] if r.get("D1C", "").startswith("41")]
+        pr_data = [r for r in resp[1:] if r.get("D1C", "").startswith("41")]
 
         if not pr_data:
-            print("  Sem dados do PR no SIDRA, usando fallback")
+            print("  No PR data in SIDRA, using fallback")
             return get_vbp_fallback()
 
         # Calcular totais
@@ -85,7 +141,7 @@ def fetch_vbp_sidra():
         return vbp_kpis, vbp_municipios
 
     except Exception as e:
-        print(f"  Erro SIDRA: {e}")
+        print(f"  SIDRA error: {e}")
         return get_vbp_fallback()
 
 
@@ -137,21 +193,17 @@ def fetch_comexstat():
             "metrics": ["metricFOB"]
         }
 
-        resp_exp = requests.post(url, json=export_payload, timeout=30)
+        resp_exp = request_with_retry("POST", url, max_retries=3, timeout=60, json=export_payload)
 
         # Importações
         import_payload = export_payload.copy()
         import_payload["flow"] = "import"
 
-        resp_imp = requests.post(url, json=import_payload, timeout=30)
+        resp_imp = request_with_retry("POST", url, max_retries=3, timeout=60, json=import_payload)
 
-        if resp_exp.status_code == 200 and resp_imp.status_code == 200:
-            exp_data = resp_exp.json()
-            imp_data = resp_imp.json()
-
-            # Extrair valores totais
-            exp_total = exp_data.get("data", {}).get("list", [{}])[0].get("metricFOB", 0)
-            imp_total = imp_data.get("data", {}).get("list", [{}])[0].get("metricFOB", 0)
+        if resp_exp and resp_imp:
+            exp_total = resp_exp.get("data", {}).get("list", [{}])[0].get("metricFOB", 0)
+            imp_total = resp_imp.get("data", {}).get("list", [{}])[0].get("metricFOB", 0)
 
             if exp_total or imp_total:
                 return {
@@ -162,11 +214,11 @@ def fetch_comexstat():
                     "mes_referencia": to_period,
                 }
 
-        print("  ComexStat API sem dados, usando fallback")
+        print("  ComexStat API no data, using fallback")
         return get_comex_fallback()
 
     except Exception as e:
-        print(f"  Erro ComexStat: {e}")
+        print(f"  ComexStat error: {e}")
         return get_comex_fallback()
 
 
@@ -189,39 +241,36 @@ def fetch_emprego_agro():
         # Seção A = Agricultura, pecuária, produção florestal, pesca e aquicultura
         url = "https://apisidra.ibge.gov.br/values/t/6450/n3/41/v/707/p/last%203/c12762/117897"
 
-        resp = requests.get(url, timeout=30)
+        resp = request_with_retry("GET", url, max_retries=3, timeout=60)
 
-        if resp.status_code == 200:
-            data = resp.json()
+        if resp and isinstance(resp, list) and len(resp) > 1:
+            # Pegar valores dos últimos anos
+            valores = []
+            for r in resp[1:]:
+                ano = r.get("D3N", "")
+                val = float(r.get("V", 0) or 0)
+                if val > 0:
+                    valores.append({"ano": ano, "pessoal_ocupado": val})
 
-            if len(data) > 1:
-                # Pegar valores dos últimos anos
-                valores = []
-                for r in data[1:]:
-                    ano = r.get("D3N", "")
-                    val = float(r.get("V", 0) or 0)
-                    if val > 0:
-                        valores.append({"ano": ano, "pessoal_ocupado": val})
+            if valores:
+                valores = sorted(valores, key=lambda x: x["ano"], reverse=True)
+                atual = valores[0]["pessoal_ocupado"]
+                anterior = valores[1]["pessoal_ocupado"] if len(valores) > 1 else atual
+                variacao = ((atual - anterior) / anterior * 100) if anterior else 0
 
-                if valores:
-                    valores = sorted(valores, key=lambda x: x["ano"], reverse=True)
-                    atual = valores[0]["pessoal_ocupado"]
-                    anterior = valores[1]["pessoal_ocupado"] if len(valores) > 1 else atual
-                    variacao = ((atual - anterior) / anterior * 100) if anterior else 0
+                return {
+                    "estoque_atual": int(atual),
+                    "saldo_mes": int((atual - anterior) / 12) if len(valores) > 1 else 0,
+                    "variacao_yoy": round(variacao, 1),
+                    "ano_referencia": valores[0]["ano"],
+                    "serie": valores[:5],
+                }
 
-                    return {
-                        "estoque_atual": int(atual),
-                        "saldo_mes": int((atual - anterior) / 12) if len(valores) > 1 else 0,
-                        "variacao_yoy": round(variacao, 1),
-                        "ano_referencia": valores[0]["ano"],
-                        "serie": valores[:5],
-                    }
-
-        print("  SIDRA emprego sem dados, usando fallback")
+        print("  SIDRA emprego no data, using fallback")
         return get_emprego_fallback()
 
     except Exception as e:
-        print(f"  Erro emprego: {e}")
+        print(f"  Employment error: {e}")
         return get_emprego_fallback()
 
 
@@ -248,11 +297,10 @@ def fetch_credito_rural():
 
         url = f"https://olinda.bcb.gov.br/olinda/servico/SICOR/versao/v2/odata/CusteioMunicipio?$filter=UF%20eq%20'PR'%20and%20AnoEmissao%20eq%20{ano}&$format=json&$top=5000"
 
-        resp = requests.get(url, timeout=90)
+        resp = request_with_retry("GET", url, max_retries=3, timeout=60)
 
-        if resp.status_code == 200:
-            data = resp.json()
-            items = data.get("value", [])
+        if resp and isinstance(resp, dict):
+            items = resp.get("value", [])
 
             if items:
                 total = sum(float(i.get("VlCusteio", 0) or 0) for i in items)
@@ -280,11 +328,11 @@ def fetch_credito_rural():
 
                 return kpis, municipios
 
-        print("  SICOR sem dados, usando fallback")
+        print("  SICOR no data, using fallback")
         return get_credito_fallback()
 
     except Exception as e:
-        print(f"  Erro SICOR: {e}")
+        print(f"  SICOR error: {e}")
         return get_credito_fallback()
 
 
@@ -312,13 +360,15 @@ def get_credito_fallback():
 
 
 def main():
+    start_time = datetime.now()
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     print("=== ETL Agro ===")
     results = {}
+    errors = []
 
     # VBP
-    print("1/4 Buscando VBP SIDRA...")
+    print("1/4 Fetching VBP SIDRA...")
     try:
         vbp_kpis, vbp_municipios = fetch_vbp_sidra()
         if vbp_kpis:
@@ -327,55 +377,91 @@ def main():
             print(f"  VBP Total: R$ {vbp_kpis['vbp_total_brl']:,.0f}")
         if vbp_municipios:
             upsert_cache(supabase, "vbp_municipios_pr", vbp_municipios, "ibge_sidra")
-            print(f"  {len(vbp_municipios)} municipios salvos")
+            print(f"  {len(vbp_municipios)} municipalities saved")
     except Exception as e:
-        print(f"  ERRO VBP: {e}")
-        results["vbp"] = f"ERRO: {e}"
+        print(f"  ERROR VBP: {e}")
+        results["vbp"] = "ERROR"
+        errors.append(f"VBP: {str(e)}")
 
     # ComexStat
-    print("2/4 Buscando ComexStat MDIC...")
+    print("2/4 Fetching ComexStat MDIC...")
     try:
         comex = fetch_comexstat()
         if comex:
             upsert_cache(supabase, "comex_kpis_pr", comex, "mdic_comexstat")
             results["comex"] = "OK"
-            print(f"  Exportacoes: US$ {comex['exportacoes_usd']:,.0f}")
+            print(f"  Exports: US$ {comex['exportacoes_usd']:,.0f}")
     except Exception as e:
-        print(f"  ERRO ComexStat: {e}")
-        results["comex"] = f"ERRO: {e}"
+        print(f"  ERROR ComexStat: {e}")
+        results["comex"] = "ERROR"
+        errors.append(f"ComexStat: {str(e)}")
 
     # Emprego
-    print("3/4 Buscando emprego agro...")
+    print("3/4 Fetching agricultural employment...")
     try:
         emprego = fetch_emprego_agro()
         if emprego:
             upsert_cache(supabase, "emprego_agro_pr", emprego, "ibge_cempre")
             results["emprego"] = "OK"
-            print(f"  Estoque: {emprego['estoque_atual']:,} pessoas")
+            print(f"  Stock: {emprego['estoque_atual']:,} people")
     except Exception as e:
-        print(f"  ERRO emprego: {e}")
-        results["emprego"] = f"ERRO: {e}"
+        print(f"  ERROR employment: {e}")
+        results["emprego"] = "ERROR"
+        errors.append(f"Employment: {str(e)}")
 
     # Credito Rural
-    print("4/4 Buscando credito rural SICOR...")
+    print("4/4 Fetching rural credit SICOR...")
     try:
         credito_kpis, credito_municipios = fetch_credito_rural()
         if credito_kpis:
             upsert_cache(supabase, "credito_rural_pr", credito_kpis, "bcb_sicor")
             results["credito"] = "OK"
-            print(f"  Credito: R$ {credito_kpis['total_ano_brl']:,.0f}")
+            print(f"  Credit: R$ {credito_kpis['total_ano_brl']:,.0f}")
         if credito_municipios:
             upsert_cache(supabase, "credito_rural_municipios_pr", credito_municipios, "bcb_sicor")
-            print(f"  {len(credito_municipios)} municipios com credito rural salvos")
+            print(f"  {len(credito_municipios)} municipalities with rural credit saved")
     except Exception as e:
-        print(f"  ERRO SICOR: {e}")
-        results["credito"] = f"ERRO: {e}"
+        print(f"  ERROR SICOR: {e}")
+        results["credito"] = "ERROR"
+        errors.append(f"SICOR: {str(e)}")
+
+    # Calculate duration
+    end_time = datetime.now()
+    duration_seconds = (end_time - start_time).total_seconds()
+
+    # Determine overall status
+    overall_status = "SUCCESS" if all(v == "OK" for v in results.values()) else "PARTIAL"
+    if all(v == "ERROR" for v in results.values()):
+        overall_status = "FAILURE"
+
+    # Health tracking
+    health_data = {
+        "last_run": start_time.isoformat(),
+        "status": overall_status,
+        "duration_seconds": round(duration_seconds, 2),
+        "vbp_status": results.get("vbp", "UNKNOWN"),
+        "comex_status": results.get("comex", "UNKNOWN"),
+        "emprego_status": results.get("emprego", "UNKNOWN"),
+        "credito_status": results.get("credito", "UNKNOWN"),
+        "errors": errors,
+    }
+
+    try:
+        upsert_health(supabase, health_data)
+    except Exception as e:
+        print(f"  WARNING: Could not upsert health data: {e}")
 
     # Resumo
-    print("\n=== Resumo ETL Agro ===")
+    print("\n=== ETL Agro Summary ===")
     for k, v in results.items():
         print(f"  {k}: {v}")
-    print("ETL Agro concluido!")
+    print(f"  Duration: {duration_seconds:.1f}s")
+    print(f"  Overall Status: {overall_status}")
+    if errors:
+        print(f"  Errors: {len(errors)}")
+        for err in errors:
+            print(f"    - {err}")
+    print("ETL Agro completed!")
 
 
 if __name__ == "__main__":
