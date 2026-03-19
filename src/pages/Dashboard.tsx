@@ -5,6 +5,7 @@ import { useEstacoesPR, useAlertasINMET } from '@/hooks/useClima'
 import { useNoticiasStats } from '@/hooks/useNoticias'
 import { useFireSpots } from '@/hooks/useAmbiente'
 import { useDengueAtual } from '@/hooks/useSaude'
+import { EtlHealthPanel } from '@/components/ui/EtlHealthPanel'
 
 export function DashboardPage() {
   const { user, subscription, accessStatus, isPro } = useAuth()
@@ -89,6 +90,9 @@ export function DashboardPage() {
           />
         </div>
       )}
+
+      {/* Health Check dos Pipelines */}
+      <EtlHealthPanel />
 
       <p className="text-text-muted text-sm">
         Use o menu lateral para navegar pelos módulos de inteligência.

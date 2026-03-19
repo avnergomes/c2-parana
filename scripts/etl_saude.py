@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""ETL Saude: InfoDengue por municipio PR - versao otimizada."""
+"""ETL Saude: InfoDengue por municipio PR - versao otimizada com concorrencia e adaptive backoff."""
 
 import os
 import time
 import requests
+import threading
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
 from supabase import create_client
 from dotenv import load_dotenv
 
@@ -76,6 +79,80 @@ TIER1_MUNICIPIOS = [
 ]
 
 
+# =====================================================
+# ESTADO COMPARTILHADO PARA RATE LIMITING ADAPTATIVO
+# =====================================================
+class AdaptiveRateLimiter:
+    """Gerencia rate limiting com adaptive backoff e circuit breaker."""
+
+    def __init__(self, initial_delay_ms=100):
+        self.base_delay_ms = initial_delay_ms
+        self.current_delay_ms = initial_delay_ms
+        self.lock = threading.Lock()
+
+        # Rastreamento de erros global
+        self.total_requests = 0
+        self.total_errors = 0
+        self.consecutive_errors = 0
+        self.circuit_breaker_open = False
+
+    def wait(self):
+        """Aplica delay com base no estado atual."""
+        with self.lock:
+            if self.circuit_breaker_open:
+                time.sleep(0.5)  # Delay maior se circuit breaker aberto
+            else:
+                time.sleep(self.current_delay_ms / 1000.0)
+
+    def on_success(self):
+        """Callback de sucesso - reseta delay adaptativo."""
+        with self.lock:
+            self.total_requests += 1
+            self.consecutive_errors = 0
+            # Reset gradual: reduce delay 5% por sucesso, min 100ms
+            self.current_delay_ms = max(100, self.current_delay_ms * 0.95)
+
+            # Reabilita circuit breaker se erro rate melhorou
+            if self.circuit_breaker_open and self.get_error_rate() < 0.30:
+                print(f"  [CircuitBreaker] Taxa de erro < 30%, reabrindo circuito")
+                self.circuit_breaker_open = False
+
+    def on_429(self):
+        """Callback rate limit (429) - adaptive backoff."""
+        with self.lock:
+            self.total_requests += 1
+            self.total_errors += 1
+            self.consecutive_errors += 1
+            # Dobra o delay em 429
+            self.current_delay_ms = min(self.current_delay_ms * 2, 10000)  # Max 10s
+            print(f"  [RateLimit] 429 recebido, novo delay: {self.current_delay_ms}ms")
+
+    def on_error(self):
+        """Callback de erro generico."""
+        with self.lock:
+            self.total_requests += 1
+            self.total_errors += 1
+            self.consecutive_errors += 1
+            # Pequeno aumento no delay para erros genéricos
+            self.current_delay_ms = min(self.current_delay_ms * 1.2, 10000)
+
+    def get_error_rate(self):
+        """Retorna taxa de erro global."""
+        with self.lock:
+            if self.total_requests == 0:
+                return 0.0
+            return self.total_errors / self.total_requests
+
+    def check_circuit_breaker(self):
+        """Verifica se deve abrir circuit breaker."""
+        with self.lock:
+            error_rate = self.get_error_rate()
+            if error_rate > 0.50:
+                self.circuit_breaker_open = True
+                return True
+            return self.circuit_breaker_open
+
+
 def get_full_pr_municipalities():
     """Busca lista completa de municipios PR do IBGE."""
     url = "https://servicodados.ibge.gov.br/api/v1/localidades/estados/41/municipios"
@@ -88,31 +165,62 @@ def get_full_pr_municipalities():
         return []
 
 
-def fetch_dengue_batch(municipios: list, label: str) -> list:
-    """Busca dados de dengue para uma lista de municipios com rate limiting."""
-    all_dengue = []
-    erros = 0
-    max_erros = 10  # Para se tiver mais de 10 erros consecutivos
+def fetch_dengue_municipality(mun: dict, limiter: AdaptiveRateLimiter) -> dict:
+    """
+    Busca dados de dengue para um municipio com retry automático.
+    Retorna dict com chaves: success, data, error_msg
+    """
+    mun_name = mun["name"]
+    mun_ibge = mun["ibge"]
 
-    for i, mun in enumerate(municipios):
-        if i % 25 == 0:
-            print(f"  [{label}] Progresso: {i}/{len(municipios)} | Erros: {erros}")
+    # Tentar 2 vezes (1 tentativa + 1 retry)
+    for attempt in range(2):
+        if limiter.check_circuit_breaker():
+            return {
+                "success": False,
+                "data": [],
+                "error_msg": "Circuit breaker aberto (taxa de erro > 50%)",
+                "mun_ibge": mun_ibge,
+                "mun_name": mun_name,
+            }
 
-        url = f"https://info.dengue.mat.br/api/alertcity?geocode={mun['ibge']}&disease=dengue&format=json&ew_start=1&ew_end=52&ey_start={CURRENT_YEAR - 1}&ey_end={CURRENT_YEAR}"
+        url = f"https://info.dengue.mat.br/api/alertcity?geocode={mun_ibge}&disease=dengue&format=json&ew_start=1&ew_end=52&ey_start={CURRENT_YEAR - 1}&ey_end={CURRENT_YEAR}"
 
         try:
-            resp = requests.get(url, timeout=15)  # Timeout menor: 15s em vez de 30s
+            resp = requests.get(url, timeout=15)
 
             if resp.status_code == 429:
-                print(f"  Rate limited! Esperando 10s...")
-                time.sleep(10)
-                resp = requests.get(url, timeout=15)  # Retry
+                limiter.on_429()
+                if attempt == 0:
+                    print(f"  [429] {mun_name} - Retry em 2s...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return {
+                        "success": False,
+                        "data": [],
+                        "error_msg": f"Rate limited (429) após retry",
+                        "mun_ibge": mun_ibge,
+                        "mun_name": mun_name,
+                    }
 
             if resp.status_code != 200:
-                erros += 1
-                continue
+                limiter.on_error()
+                if attempt == 0:
+                    print(f"  [HTTP {resp.status_code}] {mun_name} - Retry em 2s...")
+                    time.sleep(2)
+                    continue
+                else:
+                    return {
+                        "success": False,
+                        "data": [],
+                        "error_msg": f"HTTP {resp.status_code}",
+                        "mun_ibge": mun_ibge,
+                        "mun_name": mun_name,
+                    }
 
             records = resp.json()
+            dengue_records = []
 
             for rec in records[-4:]:  # ultimas 4 semanas
                 try:
@@ -123,9 +231,9 @@ def fetch_dengue_batch(municipios: list, label: str) -> list:
                     # Limitar alert_level a 4 (constraint do banco)
                     alert_level = min(int(rec.get("nivel", 0) or 0), 4)
 
-                    all_dengue.append({
-                        "ibge_code": mun["ibge"],
-                        "municipality_name": mun["name"],
+                    dengue_records.append({
+                        "ibge_code": mun_ibge,
+                        "municipality_name": mun_name,
                         "epidemiological_week": week,
                         "year": year,
                         "cases": int(rec.get("casos", 0) or 0),
@@ -137,31 +245,118 @@ def fetch_dengue_batch(municipios: list, label: str) -> list:
                 except:
                     continue
 
-            erros = 0  # Reset erro counter em sucesso
+            limiter.on_success()
+            return {
+                "success": True,
+                "data": dengue_records,
+                "error_msg": None,
+                "mun_ibge": mun_ibge,
+                "mun_name": mun_name,
+            }
 
         except requests.exceptions.Timeout:
-            erros += 1
-            print(f"  Timeout em {mun['name']} ({mun['ibge']})")
+            limiter.on_error()
+            if attempt == 0:
+                print(f"  [Timeout] {mun_name} - Retry em 2s...")
+                time.sleep(2)
+                continue
+            else:
+                return {
+                    "success": False,
+                    "data": [],
+                    "error_msg": "Timeout",
+                    "mun_ibge": mun_ibge,
+                    "mun_name": mun_name,
+                }
         except Exception as e:
-            erros += 1
+            limiter.on_error()
+            if attempt == 0:
+                print(f"  [Erro] {mun_name}: {e} - Retry em 2s...")
+                time.sleep(2)
+                continue
+            else:
+                return {
+                    "success": False,
+                    "data": [],
+                    "error_msg": str(e),
+                    "mun_ibge": mun_ibge,
+                    "mun_name": mun_name,
+                }
 
-        # Rate limiting: 100ms entre requests para nao sobrecarregar InfoDengue
-        time.sleep(0.1)
+        limiter.wait()
 
-        # Circuit breaker: se muitos erros seguidos, parar
-        if erros >= max_erros:
-            print(f"  {max_erros} erros consecutivos. Parando batch {label}.")
-            break
+    # Fallback (nunca deve chegar aqui, mas segurança)
+    return {
+        "success": False,
+        "data": [],
+        "error_msg": "Falha após retry",
+        "mun_ibge": mun_ibge,
+        "mun_name": mun_name,
+    }
 
-    return all_dengue
+
+def fetch_dengue_concurrent(municipios: list, max_workers: int = 5) -> tuple:
+    """
+    Busca dados de dengue para lista de municipios com concorrencia.
+    Retorna: (all_dengue, stats_dict)
+    """
+    limiter = AdaptiveRateLimiter(initial_delay_ms=100)
+    all_dengue = []
+    failed_municipalities = []
+    results_lock = threading.Lock()
+
+    print(f"  Iniciando fetch concorrente com {max_workers} workers...")
+    start_time = time.time()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(fetch_dengue_municipality, mun, limiter): mun
+            for mun in municipios
+        }
+
+        completed = 0
+        for future in as_completed(futures):
+            completed += 1
+
+            # Log de progresso a cada 25 municipios
+            if completed % 25 == 0 or completed == len(futures):
+                error_rate = limiter.get_error_rate()
+                print(f"  Progresso: {completed}/{len(futures)} | Taxa erro: {error_rate:.1%} | Delay: {limiter.current_delay_ms}ms")
+
+            result = future.result()
+
+            with results_lock:
+                if result["success"]:
+                    all_dengue.extend(result["data"])
+                else:
+                    failed_municipalities.append({
+                        "ibge": result["mun_ibge"],
+                        "name": result["mun_name"],
+                        "error": result["error_msg"],
+                    })
+
+    duration = time.time() - start_time
+
+    stats = {
+        "municipalities_processed": len(municipios),
+        "municipalities_failed": len(failed_municipalities),
+        "records_saved": len(all_dengue),
+        "duration_seconds": duration,
+        "final_error_rate": limiter.get_error_rate(),
+        "errors": [f"{m['name']}: {m['error']}" for m in failed_municipalities[:20]],  # Top 20
+    }
+
+    return all_dengue, stats
 
 
-def upsert_dengue(supabase, records: list):
-    """Insere dados de dengue no Supabase em lotes."""
+def upsert_dengue(supabase, records: list) -> int:
+    """Insere dados de dengue no Supabase em lotes. Retorna count de registros salvos."""
     if not records:
-        return
+        return 0
 
-    # Inserir em lotes de 200 (mais eficiente que 100)
+    saved_count = 0
+
+    # Inserir em lotes de 200
     for i in range(0, len(records), 200):
         batch = records[i:i+200]
         try:
@@ -169,6 +364,7 @@ def upsert_dengue(supabase, records: list):
                 batch,
                 on_conflict="ibge_code,year,epidemiological_week"
             ).execute()
+            saved_count += len(batch)
         except Exception as e:
             print(f"  Erro upsert lote {i}: {e}")
             # Tentar inserir um por um
@@ -178,15 +374,37 @@ def upsert_dengue(supabase, records: list):
                         [rec],
                         on_conflict="ibge_code,year,epidemiological_week"
                     ).execute()
+                    saved_count += 1
                 except:
                     pass
+
+    return saved_count
+
+
+def upsert_etl_health(supabase, health_record: dict):
+    """Upsert de ETL health tracking na tabela data_cache."""
+    try:
+        supabase.table("data_cache").upsert(
+            {
+                "cache_key": "etl_health_saude",
+                "cache_value": health_record,
+                "updated_at": datetime.utcnow().isoformat() + "Z",
+            },
+            on_conflict="cache_key"
+        ).execute()
+        print("  ETL health upserted com sucesso")
+    except Exception as e:
+        print(f"  Erro ao upsert ETL health: {e}")
 
 
 def main():
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+    start_time = time.time()
+
     # Verificar se deve rodar modo completo
     is_full_run = os.environ.get("FULL_RUN", "false").lower() == "true"
+    mode = "full" if is_full_run else "tier1"
 
     if is_full_run:
         print("=== MODO COMPLETO: Todos os 399 municipios ===")
@@ -196,21 +414,51 @@ def main():
         else:
             print("Falha ao buscar lista completa, usando Tier 1")
             municipios = TIER1_MUNICIPIOS
+            mode = "tier1"
     else:
         print("=== MODO RAPIDO: Top 50 municipios (Tier 1) ===")
         municipios = TIER1_MUNICIPIOS
 
     print(f"Total: {len(municipios)} municipios")
 
-    records = fetch_dengue_batch(municipios, "main")
+    # Fetch concorrente com 5 workers
+    dengue_data, stats = fetch_dengue_concurrent(municipios, max_workers=5)
 
-    if records:
-        upsert_dengue(supabase, records)
-        print(f"Dengue: {len(records)} registros salvos")
+    # Upsert dengue data
+    records_saved = 0
+    if dengue_data:
+        records_saved = upsert_dengue(supabase, dengue_data)
+        print(f"Dengue: {records_saved} registros salvos")
     else:
         print("Nenhum registro de dengue obtido")
 
-    print("ETL Saude concluido!")
+    # Preparar health record
+    duration = time.time() - start_time
+    status = "success" if stats["municipalities_failed"] == 0 else ("partial" if stats["municipalities_failed"] < len(municipios) * 0.3 else "error")
+
+    health_record = {
+        "last_run": datetime.utcnow().isoformat() + "Z",
+        "status": status,
+        "mode": mode,
+        "municipalities_processed": stats["municipalities_processed"],
+        "municipalities_failed": stats["municipalities_failed"],
+        "records_saved": records_saved,
+        "duration_seconds": duration,
+        "errors": stats["errors"],
+    }
+
+    # Upsert ETL health
+    upsert_etl_health(supabase, health_record)
+
+    print("=" * 60)
+    print(f"ETL Saude concluido!")
+    print(f"Status: {status}")
+    print(f"Municipios processados: {stats['municipalities_processed']}")
+    print(f"Municipios falhados: {stats['municipalities_failed']}")
+    print(f"Registros salvos: {records_saved}")
+    print(f"Duracao: {duration:.2f}s")
+    print(f"Taxa de erro final: {stats['final_error_rate']:.1%}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

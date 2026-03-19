@@ -14,6 +14,8 @@ import requests
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 
 load_dotenv()
 
@@ -156,6 +158,27 @@ def parse_inmet_record(record: dict, station_code: str, meta: dict) -> dict | No
 
 # ─── OPEN-METEO (fallback) ──────────────────────────────────────────
 
+def format_openmeteo_timestamp(time_str: str) -> str:
+    """Converte timestamp Open-Meteo para ISO formato com timezone."""
+    if not time_str:
+        return ""
+
+    # Se já tem timezone, retornar como está
+    if "T" in time_str and "-03:00" in time_str:
+        return time_str
+
+    # Se tem "T" mas não tem timezone
+    if "T" in time_str and "-03:00" not in time_str:
+        # Adicionar timezone
+        return time_str + "-03:00"
+
+    # Se é apenas data (YYYY-MM-DD)
+    if len(time_str) == 10 and time_str.count("-") == 2:
+        return time_str + "T00:00:00-03:00"
+
+    return time_str + "-03:00" if time_str else ""
+
+
 def fetch_openmeteo_current(station_code: str, meta: dict) -> list:
     """Busca dados atuais via Open-Meteo (fallback quando INMET falha)."""
     url = "https://api.open-meteo.com/v1/forecast"
@@ -178,9 +201,7 @@ def fetch_openmeteo_current(station_code: str, meta: dict) -> list:
         wind_kmh = current.get("wind_speed_10m")
         wind_ms = round(wind_kmh / 3.6, 1) if wind_kmh is not None else None
 
-        observed_at = current.get("time", "")
-        if observed_at and not observed_at.endswith("-03:00"):
-            observed_at += ":00-03:00"
+        observed_at = format_openmeteo_timestamp(current.get("time", ""))
 
         record = {
             "station_code": station_code,
@@ -231,9 +252,7 @@ def fetch_openmeteo_hourly(station_code: str, meta: dict, days: int = 2) -> list
             wind_ms = round(wind_kmh / 3.6, 1) if wind_kmh is not None else None
             wind_dir = hourly["wind_direction_10m"][i] if hourly.get("wind_direction_10m") else None
 
-            observed_at = t
-            if not observed_at.endswith("-03:00"):
-                observed_at += ":00-03:00"
+            observed_at = format_openmeteo_timestamp(t)
 
             records.append({
                 "station_code": station_code,
@@ -315,13 +334,52 @@ def fetch_alerts(session: requests.Session) -> list:
     return []
 
 
+# ─── FALLBACK COM CONCORRÊNCIA ──────────────────────────────────────
+
+def fetch_openmeteo_for_stations_concurrent(stations_data: list) -> dict:
+    """Busca dados Open-Meteo para múltiplas estações em paralelo."""
+    results = {}
+
+    def _fetch_station(station_code: str, meta: dict) -> tuple:
+        """Wrapper para fetch Open-Meteo - retorna (code, records)."""
+        try:
+            hourly = fetch_openmeteo_hourly(station_code, meta, days=2)
+            if hourly:
+                return (station_code, hourly)
+            current = fetch_openmeteo_current(station_code, meta)
+            return (station_code, current)
+        except Exception as e:
+            print(f"    Concurrent error {station_code}: {e}")
+            return (station_code, [])
+
+    # Usar ThreadPoolExecutor para buscar em paralelo
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {}
+        for station_code, meta in stations_data:
+            future = executor.submit(_fetch_station, station_code, meta)
+            futures[future] = station_code
+
+        for future in as_completed(futures):
+            try:
+                station_code, records = future.result()
+                results[station_code] = records
+            except Exception as e:
+                station_code = futures[future]
+                print(f"    Concurrent fetch failed for {station_code}: {e}")
+                results[station_code] = []
+
+    return results
+
+
 # ─── MAIN ────────────────────────────────────────────────────────────
 
 def main():
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     session = create_session()
 
-    now = datetime.now()
+    # Timestamp no início para calcular duração
+    start_time = time.time()
+    now = datetime.now(timezone.utc)
     date_fim = now.strftime("%Y-%m-%d")
     date_ini = (now - timedelta(days=2)).strftime("%Y-%m-%d")
 
@@ -332,6 +390,11 @@ def main():
     inmet_ok = 0
     openmeteo_ok = 0
     failed = 0
+    failed_stations = []
+    errors_log = []
+
+    # Estações que falharam no INMET para buscar em paralelo
+    failed_inmet_stations = []
 
     for station_code, meta in PR_STATIONS.items():
         print(f"\n  Estação {station_code} — {meta['name']}")
@@ -354,24 +417,31 @@ def main():
                     if has_data:
                         station_records.append(parsed)
 
-        # 2) Se INMET falhou → Open-Meteo como fallback
+        # 2) Se INMET falhou → marcar para fallback paralelo
         if not station_records:
-            print(f"    INMET sem dados, tentando Open-Meteo...")
-            # Buscar dados horários (últimas horas) + current
-            station_records = fetch_openmeteo_hourly(station_code, meta, days=2)
-            if not station_records:
-                station_records = fetch_openmeteo_current(station_code, meta)
-
-            if station_records:
-                openmeteo_ok += 1
-            else:
-                failed += 1
+            failed_inmet_stations.append((station_code, meta))
 
         all_records.extend(station_records)
+
+    # 3) Buscar fallback Open-Meteo para estações que falharam (em paralelo)
+    if failed_inmet_stations:
+        print(f"\n  Buscando Open-Meteo para {len(failed_inmet_stations)} estações (em paralelo)...")
+        openmeteo_results = fetch_openmeteo_for_stations_concurrent(failed_inmet_stations)
+
+        for station_code, records in openmeteo_results.items():
+            if records:
+                openmeteo_ok += 1
+                all_records.extend(records)
+            else:
+                failed += 1
+                failed_stations.append(station_code)
+                errors_log.append(f"Station {station_code}: no data from INMET or Open-Meteo")
 
     print(f"\n{'='*50}")
     print(f"Resumo: INMET={inmet_ok} | Open-Meteo={openmeteo_ok} | Falhas={failed}")
     print(f"Total registros válidos: {len(all_records)}")
+
+    etl_status = "success"
 
     if all_records:
         print(f"  Amostra: {all_records[0]['station_code']} temp={all_records[0]['temperature']}°C at={all_records[0]['observed_at']}")
@@ -383,6 +453,8 @@ def main():
             print(f"Inseridos/atualizados: {len(all_records)} registros")
         except Exception as e:
             print(f"ERRO upsert: {e}")
+            errors_log.append(f"Bulk upsert error: {str(e)}")
+            etl_status = "partial"
             for rec in all_records[:3]:
                 try:
                     supabase.table("climate_data").upsert(
@@ -391,38 +463,76 @@ def main():
                     print(f"    OK: {rec['station_code']} {rec['observed_at']}")
                 except Exception as e2:
                     print(f"    FALHA: {rec['station_code']} -> {e2}")
+                    errors_log.append(f"Upsert {rec['station_code']}: {str(e2)}")
 
         # Limpar dados antigos (>48h)
-        cutoff = (now - timedelta(hours=48)).isoformat()
-        supabase.table("climate_data").delete().lt("observed_at", cutoff).execute()
-        print("Dados antigos limpos (>48h)")
+        try:
+            cutoff = (now - timedelta(hours=48)).isoformat()
+            supabase.table("climate_data").delete().lt("observed_at", cutoff).execute()
+            print("Dados antigos limpos (>48h)")
+        except Exception as e:
+            print(f"AVISO: Falha ao limpar dados antigos: {e}")
+            errors_log.append(f"Cleanup error: {str(e)}")
     else:
         print("ATENÇÃO: Nenhum dado obtido de nenhuma fonte!")
         print("  Verificar conectividade e status das APIs")
+        etl_status = "error"
+        errors_log.append("No data retrieved from any source")
 
-    # Alertas
+    # Alertas (isolados em try/except para não afetar relatório de clima)
     print("\nBuscando alertas INMET...")
-    alerts = fetch_alerts(session)
+    try:
+        alerts = fetch_alerts(session)
 
-    if alerts:
-        new_ids = [a["external_id"] for a in alerts if a.get("external_id")]
-        try:
-            supabase.table("alerts").upsert(
-                alerts, on_conflict="external_id"
-            ).execute()
-            print(f"Alertas salvos: {len(alerts)}")
+        if alerts:
+            new_ids = [a["external_id"] for a in alerts if a.get("external_id")]
+            try:
+                supabase.table("alerts").upsert(
+                    alerts, on_conflict="external_id"
+                ).execute()
+                print(f"Alertas salvos: {len(alerts)}")
 
-            if new_ids:
-                supabase.table("alerts") \
-                    .update({"is_active": False}) \
-                    .eq("source", "inmet") \
-                    .not_.in_("external_id", new_ids) \
-                    .execute()
-                print(f"Alertas antigos desativados (exceto {len(new_ids)} ativos)")
-        except Exception as e:
-            print(f"ERRO alertas: {e}")
-    else:
-        print("Nenhum alerta INMET para o PR")
+                if new_ids:
+                    supabase.table("alerts") \
+                        .update({"is_active": False}) \
+                        .eq("source", "inmet") \
+                        .not_.in_("external_id", new_ids) \
+                        .execute()
+                    print(f"Alertas antigos desativados (exceto {len(new_ids)} ativos)")
+            except Exception as e:
+                print(f"ERRO ao salvar alertas: {e}")
+                errors_log.append(f"Alert save error: {str(e)}")
+        else:
+            print("Nenhum alerta INMET para o PR")
+    except Exception as e:
+        print(f"ERRO ao buscar alertas: {e}")
+        errors_log.append(f"Alert fetch error: {str(e)}")
+
+    # Calcular duração
+    duration_seconds = time.time() - start_time
+
+    # Upsert ETL health record
+    print("\nGravando health check do ETL...")
+    try:
+        health_record = {
+            "key": "etl_health_clima",
+            "last_run": now.isoformat(),
+            "status": etl_status,
+            "inmet_stations_ok": inmet_ok,
+            "openmeteo_stations_ok": openmeteo_ok,
+            "failed_stations": failed,
+            "total_records": len(all_records),
+            "duration_seconds": round(duration_seconds, 2),
+            "errors": errors_log,
+            "updated_at": now.isoformat(),
+        }
+        supabase.table("data_cache").upsert(
+            health_record,
+            on_conflict="key"
+        ).execute()
+        print(f"Health check gravado: status={etl_status} | duração={duration_seconds:.2f}s")
+    except Exception as e:
+        print(f"ERRO ao gravar health check: {e}")
 
     print("\nETL Clima concluído!")
 

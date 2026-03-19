@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
-"""ETL Água: Scrape InfoHidro mananciais + reservatórios via Playwright.
+"""ETL Água: Scrape InfoHidro mananciais + reservatórios with fallbacks.
 
 InfoHidro is a Vue SPA that requires JavaScript for login and data access.
-This script uses Playwright to authenticate and extract data from the Vuex store.
+This script attempts multiple data sources with graceful fallbacks:
+  1. SAR/ANA REST API for reservoir volumes
+  2. InfoHidro telemetry API (from etl_ambiente pattern)
+  3. Playwright browser automation (if available and credentials set)
+  4. Hardcoded fallback data (last resort)
 
-Requires: playwright, supabase, python-dotenv
+Requires: supabase, python-dotenv, requests
+Optional: playwright (gracefully skipped if not available)
 Credentials: INFOHIDRO_USER, INFOHIDRO_PASS
 """
 
 import os
 import json
+import time
+import requests
 from datetime import datetime
 from supabase import create_client
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
 
 load_dotenv()
 
@@ -24,18 +30,209 @@ INFOHIDRO_BASE = "https://infohidro.simepar.br"
 INFOHIDRO_USER = os.environ.get("INFOHIDRO_USER", "")
 INFOHIDRO_PASS = os.environ.get("INFOHIDRO_PASS", "")
 
+# Try importing playwright; if not available, it will be caught later
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
+
+def request_with_retry(url, method='GET', max_retries=3, timeout=30, **kwargs):
+    """
+    Faz requisição HTTP com retry exponencial.
+
+    Args:
+        url: URL a requisitar
+        method: 'GET' ou 'POST'
+        max_retries: máximo de tentativas
+        timeout: timeout em segundos
+        **kwargs: argumentos adicionais para requests
+
+    Returns:
+        Response object se bem-sucedido, None se falhar após retries
+    """
+    base_delay = 1
+    for attempt in range(max_retries):
+        try:
+            if method.upper() == 'GET':
+                resp = requests.get(url, timeout=timeout, **kwargs)
+            elif method.upper() == 'POST':
+                resp = requests.post(url, timeout=timeout, **kwargs)
+            else:
+                raise ValueError(f"Método HTTP não suportado: {method}")
+
+            if resp.status_code < 500:
+                return resp
+
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"    HTTP {resp.status_code}, retry em {delay}s (tentativa {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                continue
+            else:
+                print(f"    HTTP {resp.status_code} após {max_retries} tentativas")
+                return resp
+
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)
+                print(f"    Timeout/conexão, retry em {delay}s: {e}")
+                time.sleep(delay)
+                continue
+            else:
+                print(f"    Falha de conexão após {max_retries} tentativas: {e}")
+                return None
+        except Exception as e:
+            print(f"    Erro inesperado: {e}")
+            return None
+
+    return None
+
 
 def upsert_cache(supabase_client, cache_key: str, data, source: str):
     """Upsert no data_cache com timestamp atualizado."""
     if isinstance(data, list):
         data = {"items": data}
 
-    supabase_client.table("data_cache").upsert({
-        "cache_key": cache_key,
-        "data": data,
-        "source": source,
-        "fetched_at": datetime.now().isoformat(),
-    }, on_conflict="cache_key").execute()
+    try:
+        supabase_client.table("data_cache").upsert({
+            "cache_key": cache_key,
+            "data": data,
+            "source": source,
+            "fetched_at": datetime.now().isoformat(),
+        }, on_conflict="cache_key").execute()
+    except Exception as e:
+        if "no unique or exclusion constraint" in str(e):
+            # Fallback: deletar antigo e inserir novo
+            supabase_client.table("data_cache").delete().eq("cache_key", cache_key).execute()
+            supabase_client.table("data_cache").insert({
+                "cache_key": cache_key,
+                "data": data,
+                "source": source,
+                "fetched_at": datetime.now().isoformat(),
+            }).execute()
+        else:
+            raise
+
+
+def upsert_health_tracking(supabase_client, health_data):
+    """Upsert health tracking record."""
+    health_record = {
+        "key": "etl_health_agua",
+        "value": health_data,
+        "updated_at": datetime.now().isoformat(),
+    }
+
+    try:
+        supabase_client.table("data_cache").upsert(
+            health_record,
+            on_conflict="key"
+        ).execute()
+    except Exception as e:
+        if "no unique or exclusion constraint" in str(e):
+            supabase_client.table("data_cache").delete().eq("key", "etl_health_agua").execute()
+            supabase_client.table("data_cache").insert(health_record).execute()
+        else:
+            raise
+
+
+def fetch_reservatorios_ana_rest() -> list:
+    """
+    Tenta buscar dados de reservatórios via API SAR/ANA REST.
+    Endpoint: https://www.ana.gov.br/sar0/MedicaoSin
+
+    Returns lista de reservatórios ou [] se falhar.
+    """
+    print("  Tentando API SAR/ANA REST...")
+    try:
+        # Endpoint ANA para medições de reservatórios
+        url = "https://www.ana.gov.br/sar0/MedicaoSin"
+        resp = request_with_retry(url, method='GET', max_retries=3, timeout=30)
+
+        if resp is None or resp.status_code != 200:
+            print(f"    API SAR/ANA indisponível (status: {resp.status_code if resp else 'conexão falhou'})")
+            return []
+
+        data = resp.json()
+        if not data:
+            print("    API SAR/ANA retornou dados vazios")
+            return []
+
+        # Processar resposta ANA
+        reservatorios = []
+        if isinstance(data, list):
+            for item in data:
+                # Mapear campos ANA para nosso schema
+                res = {
+                    "nome": item.get("name") or item.get("nome") or "Desconhecido",
+                    "volume_percent": float(item.get("volume", 0)) if item.get("volume") else 0,
+                    "volume_hm3": float(item.get("volumeHm3", 0)) if item.get("volumeHm3") else 0,
+                    "cota_m": float(item.get("cota", 0)) if item.get("cota") else 0,
+                    "vazao_afluente": float(item.get("vazaoAfluente")) if item.get("vazaoAfluente") else None,
+                    "vazao_defluente": float(item.get("vazaoDefluente")) if item.get("vazaoDefluente") else None,
+                    "tendencia": item.get("tendencia"),
+                    "chuva_mensal_mm": float(item.get("chuvaMensal")) if item.get("chuvaMensal") else None,
+                    "chuva_30d_mm": float(item.get("chuva30d")) if item.get("chuva30d") else None,
+                    "ultima_atualizacao": item.get("ultima_atualizacao") or datetime.now().isoformat(),
+                }
+                reservatorios.append(res)
+
+        print(f"    OK: {len(reservatorios)} reservatórios da API ANA")
+        return reservatorios
+
+    except Exception as e:
+        print(f"    Erro ao buscar ANA REST: {e}")
+        return []
+
+
+def fetch_reservatorios_telemetry_api() -> list:
+    """
+    Tenta buscar dados de reservatórios via API telemetria do InfoHidro.
+    Similar ao padrão usado em etl_ambiente.py.
+
+    Returns lista de reservatórios ou [] se falhar.
+    """
+    print("  Tentando API telemetria InfoHidro...")
+    try:
+        # Endpoint telemetria que já pode estar disponível
+        url = f"{INFOHIDRO_BASE}/api/telemetry/reservoirs"
+        resp = request_with_retry(url, method='GET', max_retries=3, timeout=30)
+
+        if resp is None or resp.status_code != 200:
+            print(f"    API telemetria indisponível")
+            return []
+
+        data = resp.json()
+        if not data:
+            return []
+
+        reservatorios = []
+        if isinstance(data, dict) and "data" in data:
+            data = data["data"]
+
+        if isinstance(data, list):
+            for item in data:
+                res = {
+                    "nome": item.get("name") or item.get("nome") or "Desconhecido",
+                    "volume_percent": float(item.get("volume", 0)) if item.get("volume") else 0,
+                    "volume_hm3": float(item.get("volumeHm3", 0)) if item.get("volumeHm3") else 0,
+                    "cota_m": float(item.get("cota", 0)) if item.get("cota") else 0,
+                    "vazao_afluente": float(item.get("vazaoAfluente")) if item.get("vazaoAfluente") else None,
+                    "vazao_defluente": float(item.get("vazaoDefluente")) if item.get("vazaoDefluente") else None,
+                    "tendencia": item.get("tendencia"),
+                    "chuva_mensal_mm": float(item.get("chuvaMensal")) if item.get("chuvaMensal") else None,
+                    "chuva_30d_mm": float(item.get("chuva30d")) if item.get("chuva30d") else None,
+                    "ultima_atualizacao": item.get("ultima_atualizacao") or datetime.now().isoformat(),
+                }
+                reservatorios.append(res)
+
+        print(f"    OK: {len(reservatorios)} reservatórios via telemetria")
+        return reservatorios
+
+    except Exception as e:
+        print(f"    Erro ao buscar telemetria: {e}")
+        return []
 
 
 def login_infohidro(page) -> bool:
@@ -269,57 +466,151 @@ def get_reservatorios_fallback() -> list:
 
 
 def main():
+    start_time = datetime.now()
     supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("=== ETL Água (Playwright) ===")
+    print("=== ETL Água ===")
+
     results = {}
+    errors = []
+    using_fallback = False
+    mananciais_count = 0
+    reservatorios_count = 0
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
-        page = context.new_page()
+    # 1. Reservatórios: Try REST APIs first, then Playwright, then hardcoded fallback
+    print("1/2 Coletando dados de reservatórios...")
+    reservatorios = []
 
-        # Login
-        if not login_infohidro(page):
-            print("  FALHA: Não foi possível autenticar. Abortando.")
-            browser.close()
-            return
+    # Try ANA REST API first
+    reservatorios = fetch_reservatorios_ana_rest()
 
-        # 1. Mananciais (291 water sources)
-        print("1/2 Scraping mananciais do Paraná...")
+    # If REST API failed, try telemetry API
+    if not reservatorios:
+        reservatorios = fetch_reservatorios_telemetry_api()
+
+    # If both REST APIs failed, try Playwright if available and credentials are set
+    if not reservatorios and PLAYWRIGHT_AVAILABLE and INFOHIDRO_USER and INFOHIDRO_PASS:
+        print("  Tentando Playwright (scraping via browser)...")
         try:
-            mananciais = scrape_mananciais(page)
-            if mananciais:
-                upsert_cache(supabase_client, "infohidro_mananciais_pr", mananciais, "infohidro_monitoring")
-                em_alerta = sum(1 for m in mananciais if m.get("alerta"))
-                municipios = len(set(m.get("municipio", "") for m in mananciais))
-                results["mananciais"] = f"OK ({len(mananciais)} mananciais, {em_alerta} alertas, {municipios} municípios)"
-            else:
-                results["mananciais"] = "SEM DADOS"
-        except Exception as e:
-            print(f"  ERRO mananciais: {e}")
-            results["mananciais"] = f"ERRO: {e}"
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                )
+                page = context.new_page()
 
-        # 2. Reservatórios SAIC
-        print("2/2 Scraping reservatórios SAIC...")
-        try:
-            reservatorios = scrape_reservatorios_saic(page)
-            if reservatorios:
-                upsert_cache(supabase_client, "infohidro_reservatorios_pr", reservatorios, "infohidro_simepar")
-                results["reservatorios"] = f"OK ({len(reservatorios)} reservatórios)"
-            else:
-                results["reservatorios"] = "SEM DADOS"
+                if login_infohidro(page):
+                    reservatorios = scrape_reservatorios_saic(page)
+                    if reservatorios:
+                        print(f"  OK: {len(reservatorios)} reservatórios via Playwright")
+
+                browser.close()
         except Exception as e:
-            print(f"  ERRO reservatórios: {e}")
+            print(f"  Erro Playwright: {e}")
+            errors.append(f"Playwright: {e}")
+
+    # Final fallback: hardcoded data
+    if not reservatorios:
+        print("  Usando dados hardcoded como fallback final")
+        reservatorios = get_reservatorios_fallback()
+        using_fallback = True
+
+    if reservatorios:
+        try:
+            upsert_cache(supabase_client, "infohidro_reservatorios_pr", reservatorios, "etl_agua")
+            reservatorios_count = len(reservatorios)
+            results["reservatorios"] = f"OK ({reservatorios_count} reservatórios)"
+        except Exception as e:
+            print(f"  ERRO ao salvar reservatórios: {e}")
             results["reservatorios"] = f"ERRO: {e}"
+            errors.append(f"Upsert reservatórios: {e}")
+    else:
+        results["reservatorios"] = "SEM DADOS"
+        errors.append("Não foi possível coletar dados de reservatórios")
 
-        browser.close()
+    # 2. Mananciais: Only via Playwright if available and credentials set
+    print("2/2 Coletando dados de mananciais...")
+    mananciais = []
+
+    if not PLAYWRIGHT_AVAILABLE:
+        print("  AVISO: Playwright não disponível, pulando mananciais")
+        print("  Instale com: pip install playwright && playwright install")
+        errors.append("Playwright não instalado (mananciais pulados)")
+        results["mananciais"] = "PULADO (Playwright não disponível)"
+    elif not INFOHIDRO_USER or not INFOHIDRO_PASS:
+        print("  AVISO: Credenciais InfoHidro não configuradas, pulando mananciais")
+        errors.append("Credenciais InfoHidro não configuradas (mananciais pulados)")
+        results["mananciais"] = "PULADO (Credenciais não configuradas)"
+    else:
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                )
+                page = context.new_page()
+
+                if login_infohidro(page):
+                    mananciais = scrape_mananciais(page)
+                    if mananciais:
+                        upsert_cache(supabase_client, "infohidro_mananciais_pr", mananciais, "infohidro_monitoring")
+                        em_alerta = sum(1 for m in mananciais if m.get("alerta"))
+                        municipios = len(set(m.get("municipio", "") for m in mananciais))
+                        mananciais_count = len(mananciais)
+                        results["mananciais"] = f"OK ({mananciais_count} mananciais, {em_alerta} alertas, {municipios} municípios)"
+                    else:
+                        results["mananciais"] = "SEM DADOS"
+                        errors.append("Não foi possível extrair mananciais")
+                else:
+                    results["mananciais"] = "ERRO AUTENTICAÇÃO"
+                    errors.append("Falha ao autenticar no InfoHidro")
+
+                browser.close()
+        except Exception as e:
+            print(f"  ERRO Playwright mananciais: {e}")
+            results["mananciais"] = f"ERRO: {e}"
+            errors.append(f"Playwright mananciais: {e}")
+
+    # === ETL Health Tracking ===
+    print("\n=== Registrando saúde da ETL ===")
+    duration = (datetime.now() - start_time).total_seconds()
+    status = "error" if len(errors) >= 2 else ("partial" if errors else "success")
+
+    # If we got at least one data source successfully, it's not a full error
+    if reservatorios_count > 0 or mananciais_count > 0:
+        if errors:
+            status = "partial"
+        else:
+            status = "success"
+
+    try:
+        health_data = {
+            "last_run": start_time.isoformat(),
+            "status": status,
+            "duration_seconds": duration,
+            "mananciais_count": mananciais_count,
+            "reservatorios_count": reservatorios_count,
+            "using_fallback": using_fallback,
+            "errors": errors,
+        }
+        upsert_health_tracking(supabase_client, health_data)
+        print(f"  Health record registrado: status={status}, duration={duration:.1f}s")
+        print(f"  Contadores: {mananciais_count} mananciais, {reservatorios_count} reservatórios")
+        print(f"  Usando fallback: {using_fallback}")
+    except Exception as e:
+        print(f"  Aviso ao registrar health: {e}")
 
     # Summary
     print("\n=== Resumo ETL Água ===")
     for k, v in results.items():
         print(f"  {k}: {v}")
+
+    if errors:
+        print(f"\nAvisosa/Erros ({len(errors)}):")
+        for err in errors:
+            print(f"  - {err}")
+
     print("ETL Água concluído!")
 
 
