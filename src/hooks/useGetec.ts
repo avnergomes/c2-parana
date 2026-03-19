@@ -54,6 +54,43 @@ export interface AtendimentoMap {
   [municipio_code: number]: { dia: number; total: number; produtores: number }
 }
 
+export interface ExtensaoMunicipio {
+  municipio_code: number
+  municipio: string
+  extensionistas: number
+  nomes: string[]
+}
+
+export interface ExtensaoData {
+  kpis: {
+    total_extensionistas: number
+    municipios_com_extensionista: number
+    municipios_sem_extensionista: number
+    media_por_municipio: number
+    total_projetos: number
+    total_acoes: number
+    data_referencia: string
+  }
+  extensionistas_por_municipio: ExtensaoMunicipio[]
+  projetos: { codigo: string; nome: string; detalhes?: string }[]
+  acoes: { codigo: string; nome: string }[]
+}
+
+export function useGetecExtensao() {
+  return useQuery({
+    queryKey: ['getec-extensao'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('data_cache')
+        .select('data')
+        .eq('cache_key', 'getec_extensao_pr')
+        .maybeSingle() as { data: DataCacheRow | null }
+      return (data?.data as ExtensaoData) || null
+    },
+    staleTime: 1000 * 60 * 60 * 24, // 24h
+  })
+}
+
 export function useGetecAtendimentos() {
   return useQuery({
     queryKey: ['getec-atendimentos'],
