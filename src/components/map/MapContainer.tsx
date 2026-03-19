@@ -224,7 +224,7 @@ export function MapModule() {
           {/* Layer: Queimadas (pontos) */}
           {activeLayers.includes('queimadas') && isPro && (
             <ErrorBoundary moduleName="layer queimadas">
-              <QueimadaLayer />
+              <QueimadaLayer timeFilter={timelineValue} />
             </ErrorBoundary>
           )}
 
