@@ -54,6 +54,7 @@ export function QueimadaLayer() {
             key={`fire-${fire.latitude}-${fire.longitude}-${fire.acq_date}`}
             center={[fire.latitude, fire.longitude]}
             radius={radius}
+            pane="markerPane"
             pathOptions={{
               fillColor: '#ef4444',
               fillOpacity: opacity,

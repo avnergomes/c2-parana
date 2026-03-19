@@ -26,6 +26,7 @@ export function ReservatoriosLayer() {
             key={res.nome}
             center={coords}
             radius={radius}
+            pane="markerPane"
             pathOptions={{
               fillColor: color,
               fillOpacity: 0.9,

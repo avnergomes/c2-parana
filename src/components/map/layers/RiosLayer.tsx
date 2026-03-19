@@ -21,6 +21,7 @@ export function RiosLayer() {
             key={r.station_code}
             center={[r.latitude, r.longitude]}
             radius={isAlert ? 9 : 6}
+            pane="markerPane"
             pathOptions={{
               fillColor: alert.color,
               fillOpacity: 0.85,
