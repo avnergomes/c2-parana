@@ -1,5 +1,5 @@
 // src/components/map/MapContainer.tsx
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { MapContainer as LeafletMap, TileLayer, GeoJSON, ZoomControl } from 'react-leaflet'
 import { useQuery } from '@tanstack/react-query'
 import { useMapState } from '@/hooks/useMapState'
@@ -63,6 +63,23 @@ export function MapModule() {
   // Timeline state
   const [timelineValue, setTimelineValue] = useState<string>(new Date().toISOString())
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false)
+
+  // Auto-advance timeline when playing (1 hour per 500ms)
+  useEffect(() => {
+    if (!isTimelinePlaying) return
+    const interval = setInterval(() => {
+      setTimelineValue(prev => {
+        const next = new Date(new Date(prev).getTime() + 60 * 60 * 1000) // +1h
+        const now = new Date()
+        if (next >= now) {
+          setIsTimelinePlaying(false)
+          return now.toISOString()
+        }
+        return next.toISOString()
+      })
+    }, 500)
+    return () => clearInterval(interval)
+  }, [isTimelinePlaying])
 
   // Carregar GeoJSON dos municípios
   const { data: geoJSON } = useQuery({
