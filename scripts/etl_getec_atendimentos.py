@@ -116,8 +116,9 @@ def parse_atendimentos_pdf(pdf_bytes: bytes, ref_date: str) -> dict:
       - produtores_atendidos: total producers served (year)
       - atendimentos_total: sum of all attendance counts (year)
       - atendimentos_dia: producers whose last attendance is ref_date
+      - datas: dict mapping YYYY-MM-DD -> count of producers with that last_date
     """
-    result = {"produtores_atendidos": 0, "atendimentos_total": 0, "atendimentos_dia": 0}
+    result = {"produtores_atendidos": 0, "atendimentos_total": 0, "atendimentos_dia": 0, "datas": {}}
 
     if len(pdf_bytes) < 500:
         return result
@@ -139,8 +140,16 @@ def parse_atendimentos_pdf(pdf_bytes: bytes, ref_date: str) -> dict:
                         last_date = match.group(4)
                         result["produtores_atendidos"] += 1
                         result["atendimentos_total"] += atend_count
+
+                        # Convert DD/MM/YYYY to YYYY-MM-DD
+                        try:
+                            d, m, y = last_date.split("/")
+                            iso_date = f"{y}-{m}-{d}"
+                            result["datas"][iso_date] = result["datas"].get(iso_date, 0) + 1
+                        except ValueError:
+                            pass
+
                         # Check if last attendance is on the reference date
-                        # ref_date is YYYY-MM-DD, last_date is DD/MM/YYYY
                         if ref_date:
                             ref_parts = ref_date.split("-")
                             ref_ddmmyyyy = f"{ref_parts[2]}/{ref_parts[1]}/{ref_parts[0]}"
@@ -153,9 +162,14 @@ def parse_atendimentos_pdf(pdf_bytes: bytes, ref_date: str) -> dict:
         return result
 
 
-def fetch_atendimentos(session: requests.Session, municipalities: list[dict], ref_date: str) -> list[dict]:
-    """Fetch attendance data for each municipality."""
+def fetch_atendimentos(session: requests.Session, municipalities: list[dict], ref_date: str) -> tuple[list[dict], dict[str, int]]:
+    """Fetch attendance data for each municipality.
+
+    Returns:
+        (results_per_municipality, global_date_histogram)
+    """
     results = []
+    date_histogram: dict[str, int] = {}
     total = len(municipalities)
     year = ref_date[:4]
 
@@ -203,6 +217,9 @@ def fetch_atendimentos(session: requests.Session, municipalities: list[dict], re
                         "produtores_atendidos": parsed["produtores_atendidos"],
                         "data": ref_date,
                     })
+                    # Merge date counts into global histogram
+                    for dt, count in parsed["datas"].items():
+                        date_histogram[dt] = date_histogram.get(dt, 0) + count
 
         except Exception as e:
             print(f"    Erro {mun['name']}: {e}")
@@ -210,7 +227,7 @@ def fetch_atendimentos(session: requests.Session, municipalities: list[dict], re
 
         time.sleep(0.15)
 
-    return results
+    return results, date_histogram
 
 
 def main():
@@ -238,13 +255,19 @@ def main():
     # Fetch atendimentos — ref_date = yesterday for "atendimentos_dia" count
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     print(f"2/3 Buscando atendimentos (ref: {yesterday})...")
-    results = fetch_atendimentos(session, municipalities, yesterday)
+    results, date_histogram = fetch_atendimentos(session, municipalities, yesterday)
     results.sort(key=lambda x: x["atendimentos_total"], reverse=True)
     print(f"  {len(results)} municípios com atendimentos")
+    print(f"  {len(date_histogram)} datas distintas na timeline")
 
     # Save
-    print("3/3 Salvando resultados...")
+    print("3/4 Salvando resultados por município...")
     upsert_cache(supabase_client, "getec_atendimentos_pr", results, "idr_getec_report")
+
+    # Save daily timeline (sorted by date)
+    print("4/4 Salvando timeline diária...")
+    timeline = [{"date": dt, "produtores": count} for dt, count in sorted(date_histogram.items())]
+    upsert_cache(supabase_client, "getec_timeline_pr", timeline, "idr_getec_report")
 
     total_dia = sum(r["atendimentos_dia"] for r in results)
     total_ano = sum(r["atendimentos_total"] for r in results)
