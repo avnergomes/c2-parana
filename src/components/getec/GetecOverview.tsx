@@ -119,7 +119,7 @@ export function GetecOverview({ kpis, loading, atendimentosMap, timeline }: Gete
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           <ErrorBoundary>
             <KpiCard
-              label="Atendimentos Hoje"
+              label="Atendimentos Ontem"
               value={formatNumber(atendTotals.dia)}
               accentColor="yellow"
             />
