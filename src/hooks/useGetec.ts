@@ -91,6 +91,27 @@ export function useGetecExtensao() {
   })
 }
 
+export interface TimelinePoint {
+  date: string
+  produtores: number
+}
+
+export function useGetecTimeline() {
+  return useQuery({
+    queryKey: ['getec-timeline'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('data_cache')
+        .select('data')
+        .eq('cache_key', 'getec_timeline_pr')
+        .maybeSingle() as { data: DataCacheRow | null }
+      const cached = data?.data as { items?: TimelinePoint[] } | TimelinePoint[] | null
+      return Array.isArray(cached) ? cached : (cached?.items || [])
+    },
+    staleTime: 1000 * 60 * 60 * 6,
+  })
+}
+
 export function useGetecAtendimentos() {
   return useQuery({
     queryKey: ['getec-atendimentos'],
