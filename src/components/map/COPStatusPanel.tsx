@@ -31,12 +31,6 @@ const SEVERITY_COLORS = {
   low: '#eab308',
 }
 
-const _SEVERITY_LABELS = {
-  critical: 'Crítico',
-  high: 'Alto',
-  medium: 'Médio',
-  low: 'Baixo',
-}
 
 export function COPStatusPanel({ onMunicipalityClick: _onMunicipalityClick }: COPStatusPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
