@@ -103,7 +103,7 @@ export function TimelineSlider({
   }
 
   return (
-    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[80%] max-w-[700px] z-40">
+    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[80%] max-w-[700px] z-[1000]">
       {/* Main container */}
       <div className="bg-[#111827]/90 backdrop-blur rounded-lg border border-white/10 p-3 shadow-lg">
         {/* Controls and display row */}

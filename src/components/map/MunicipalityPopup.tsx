@@ -93,7 +93,7 @@ export function MunicipalityPopup({ ibgeCode, name, onClose }: MunicipalitySitua
   const riskColor = irtcScore ? getIRTCColor(irtcScore.irtc) : '#9ca3af'
 
   return (
-    <div className="fixed left-0 top-0 h-full w-[380px] bg-card/95 backdrop-blur border-r border-white/10 z-50 overflow-hidden flex flex-col shadow-lg">
+    <div className="fixed left-0 top-0 h-full w-[380px] bg-card/95 backdrop-blur border-r border-white/10 z-[1000] overflow-hidden flex flex-col shadow-lg">
       {/* Header */}
       <div className="flex-shrink-0 p-4 border-b border-white/10">
         <div className="flex items-start justify-between mb-3">
