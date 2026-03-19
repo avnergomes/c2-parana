@@ -275,21 +275,17 @@ def main():
     daily_by_mun: dict[str, dict[str, int]] = {}
     for r in results:
         code = str(r["municipio_code"])
-        # Re-parse is expensive; we already have per-mun dates from parse step
-        # But they were merged into global histogram. We need to re-collect.
-        # Since we can't re-parse, distribute proportionally from dia count.
-        # Municipality had `atendimentos_dia` producers on ref_date
         if r["atendimentos_dia"] > 0:
-            if ref_date not in daily_by_mun:
-                daily_by_mun[ref_date] = {}
-            daily_by_mun[ref_date][code] = r["atendimentos_dia"]
+            if yesterday not in daily_by_mun:
+                daily_by_mun[yesterday] = {}
+            daily_by_mun[yesterday][code] = r["atendimentos_dia"]
     # Also build from date_histogram + municipality distribution
     # For dates other than ref_date, distribute proportionally by municipality weight
     total_prod = sum(r["produtores_atendidos"] for r in results)
     if total_prod > 0:
         mun_weights = {str(r["municipio_code"]): r["produtores_atendidos"] / total_prod for r in results}
         for dt, global_count in date_histogram.items():
-            if dt == ref_date:
+            if dt == yesterday:
                 continue  # already have exact data
             daily_by_mun[dt] = {}
             for code, weight in mun_weights.items():
