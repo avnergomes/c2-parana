@@ -6,6 +6,7 @@ import { useCheckout } from '@/hooks/useCheckout'
 import { LiveIndicator } from '@/components/ui/LiveIndicator'
 import { Clock } from '@/components/ui/Clock'
 import { ClimaWidget } from '@/components/clima/ClimaWidget'
+import { NotificationBell } from '@/components/ui/NotificationBell'
 import { cn } from '@/lib/utils'
 
 export function Header() {
@@ -61,6 +62,9 @@ export function Header() {
 
       {/* Clock */}
       <Clock />
+
+      {/* Notifications */}
+      <NotificationBell />
 
       {/* Trial badge */}
       {trialDaysLeft !== null && (

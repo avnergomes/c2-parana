@@ -1,73 +1,110 @@
 // src/components/ui/NotificationBell.tsx
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Bell } from 'lucide-react'
+import { useUnreadCount, useNotifications, useMarkAsRead } from '@/hooks/useNotifications'
+import { cn } from '@/lib/utils'
+import { Link } from 'react-router-dom'
 
-interface Alert {
-  id: string
-  title: string
-  severity: string
-  is_active: boolean
+const SEVERITY_COLOR: Record<string, string> = {
+  critical: 'bg-status-danger',
+  high: 'bg-orange-500',
+  medium: 'bg-status-warning',
+  low: 'bg-accent-green',
 }
 
-interface NotificationBellProps {
-  alerts?: Alert[]
+const SEVERITY_DOT: Record<string, string> = {
+  critical: 'text-status-danger',
+  high: 'text-orange-500',
+  medium: 'text-status-warning',
+  low: 'text-accent-green',
 }
 
-export function NotificationBell({ alerts = [] }: NotificationBellProps) {
+export function NotificationBell() {
   const [open, setOpen] = useState(false)
-  const activeAlerts = alerts.filter(a => a.is_active)
+  const ref = useRef<HTMLDivElement>(null)
+  const { data: unread = 0 } = useUnreadCount()
+  const { data } = useNotifications(0, 5)
+  const markAsRead = useMarkAsRead()
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    if (open) document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
 
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(!open)}
         className="relative p-1.5 text-text-muted hover:text-text-primary transition-colors"
         aria-label="Notificações"
       >
         <Bell className="w-5 h-5" />
-        {activeAlerts.length > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-status-danger rounded-full text-white text-[10px] flex items-center justify-center font-bold">
-            {activeAlerts.length > 9 ? '9+' : activeAlerts.length}
+        {unread > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-status-danger text-white text-[10px] font-bold px-1">
+            {unread > 99 ? '99+' : unread}
           </span>
         )}
       </button>
 
       {open && (
         <>
-          {/* Overlay para fechar */}
-          <div
-            className="fixed inset-0 z-40"
-            onClick={() => setOpen(false)}
-          />
-
-          {/* Dropdown */}
-          <div className="absolute right-0 top-full mt-1 w-72 card border border-border shadow-card-hover z-50 animate-fade-in">
-            <div className="p-3 border-b border-border flex items-center justify-between">
-              <p className="text-sm font-semibold text-text-primary">Alertas Ativos</p>
-              <button
-                onClick={() => setOpen(false)}
-                className="text-text-muted hover:text-text-primary text-lg leading-none"
-              >
-                ×
-              </button>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 w-[360px] card border border-border shadow-card-hover z-50">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <h3 className="text-sm font-semibold text-text-primary">Notificações</h3>
+              {unread > 0 && (
+                <span className="text-xs text-text-muted">{unread} não lidas</span>
+              )}
             </div>
-            <div className="max-h-60 overflow-y-auto">
-              {activeAlerts.length === 0 ? (
-                <p className="p-4 text-sm text-text-muted text-center">
-                  Sem alertas ativos
-                </p>
+
+            <div className="max-h-[320px] overflow-y-auto">
+              {(!data?.items || data.items.length === 0) ? (
+                <p className="p-6 text-center text-text-muted text-sm">Nenhuma notificação</p>
               ) : (
-                activeAlerts.map(alert => (
-                  <div key={alert.id} className="p-3 border-b border-border/50 last:border-0 hover:bg-background-elevated transition-colors">
-                    <p className="text-xs font-medium text-text-primary line-clamp-2">
-                      {alert.title}
-                    </p>
-                    <p className="text-[10px] text-text-muted mt-0.5 capitalize">
-                      {alert.severity}
-                    </p>
-                  </div>
+                data.items.map(n => (
+                  <button
+                    key={n.id}
+                    onClick={() => { if (!n.is_read) markAsRead.mutate(n.id) }}
+                    className={cn(
+                      'w-full text-left px-4 py-3 border-b border-border/50 hover:bg-background-elevated/50 transition-colors',
+                      !n.is_read && 'bg-accent-blue/5'
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      <span className={cn('mt-1.5 w-2 h-2 rounded-full flex-shrink-0', SEVERITY_COLOR[n.severity])} />
+                      <div className="min-w-0 flex-1">
+                        <p className={cn('text-sm truncate', n.is_read ? 'text-text-secondary' : 'text-text-primary font-medium')}>
+                          {n.title}
+                        </p>
+                        {n.body && (
+                          <p className="text-xs text-text-muted mt-0.5 line-clamp-2">{n.body}</p>
+                        )}
+                        <p className="text-[10px] text-text-muted mt-1">
+                          {new Date(n.sent_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          {' · '}
+                          <span className={SEVERITY_DOT[n.severity]}>{n.severity}</span>
+                        </p>
+                      </div>
+                    </div>
+                  </button>
                 ))
               )}
+            </div>
+
+            <div className="px-4 py-2.5 border-t border-border">
+              <Link
+                to="/alertas"
+                onClick={() => setOpen(false)}
+                className="text-xs text-accent-blue hover:text-accent-blue/80 font-medium"
+              >
+                Ver todas as notificações
+              </Link>
             </div>
           </div>
         </>
