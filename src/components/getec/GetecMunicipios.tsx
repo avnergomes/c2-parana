@@ -9,11 +9,13 @@ interface GetecMunicipiosProps {
   loading: boolean
 }
 
-type SortKey = 'municipio' | 'total' | 'ativos' | 'inativos' | 'taxa_atividade' | 'masculino' | 'feminino' | 'atendimentos'
+type SortKey = 'municipio' | 'total' | 'ativos' | 'inativos' | 'taxa_atividade' | 'masculino' | 'feminino' | 'atendimentos' | 'atend_total' | 'produtores'
 
 const COLUMNS: { key: SortKey; label: string; align?: 'right' }[] = [
   { key: 'municipio', label: 'Município' },
   { key: 'atendimentos', label: 'Atend. Dia', align: 'right' },
+  { key: 'atend_total', label: 'Atend. Ano', align: 'right' },
+  { key: 'produtores', label: 'Produtores', align: 'right' },
   { key: 'total', label: 'Total', align: 'right' },
   { key: 'ativos', label: 'Ativos', align: 'right' },
   { key: 'inativos', label: 'Inativos', align: 'right' },
@@ -35,9 +37,10 @@ export function GetecMunicipios({ municipios, loading }: GetecMunicipiosProps) {
       : municipios
 
     return [...list].sort((a, b) => {
-      if (sortKey === 'atendimentos') {
-        const av = atendimentosMap?.[a.municipio_code]?.dia ?? 0
-        const bv = atendimentosMap?.[b.municipio_code]?.dia ?? 0
+      if (sortKey === 'atendimentos' || sortKey === 'atend_total' || sortKey === 'produtores') {
+        const field = sortKey === 'atendimentos' ? 'dia' : sortKey === 'atend_total' ? 'total' : 'produtores'
+        const av = atendimentosMap?.[a.municipio_code]?.[field] ?? 0
+        const bv = atendimentosMap?.[b.municipio_code]?.[field] ?? 0
         return sortAsc ? av - bv : bv - av
       }
       const av = a[sortKey]
@@ -107,6 +110,20 @@ export function GetecMunicipios({ municipios, loading }: GetecMunicipiosProps) {
                     <span className={atendimentosMap[m.municipio_code].dia > 0 ? 'text-accent-green' : 'text-text-muted'}>
                       {formatNumber(atendimentosMap[m.municipio_code].dia)}
                     </span>
+                  ) : (
+                    <span className="text-text-muted">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-right font-mono">
+                  {atendimentosMap?.[m.municipio_code] != null ? (
+                    <span className="text-text-primary">{formatNumber(atendimentosMap[m.municipio_code].total)}</span>
+                  ) : (
+                    <span className="text-text-muted">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-right font-mono">
+                  {atendimentosMap?.[m.municipio_code] != null ? (
+                    <span className="text-text-primary">{formatNumber(atendimentosMap[m.municipio_code].produtores)}</span>
                   ) : (
                     <span className="text-text-muted">—</span>
                   )}

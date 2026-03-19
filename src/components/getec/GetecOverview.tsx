@@ -4,16 +4,23 @@ import { KpiCard } from '@/components/ui/KpiCard'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { formatNumber } from '@/lib/utils'
 import type { GetecKpis } from '@/types/getec'
+import type { AtendimentoMap } from '@/hooks/useGetec'
 
 interface GetecOverviewProps {
   kpis: GetecKpis
   loading: boolean
+  atendimentosMap?: AtendimentoMap | null
 }
 
 const STATUS_COLORS = ['#10b981', '#6b7280'] // green=ativo, gray=inativo
 const GENERO_COLORS = ['#3b82f6', '#ec4899', '#8b5cf6'] // blue=M, pink=F, purple=outro
 
-export function GetecOverview({ kpis, loading }: GetecOverviewProps) {
+export function GetecOverview({ kpis, loading, atendimentosMap }: GetecOverviewProps) {
+  const atendTotals = atendimentosMap ? Object.values(atendimentosMap).reduce(
+    (acc, v) => ({ dia: acc.dia + v.dia, total: acc.total + v.total, produtores: acc.produtores + v.produtores }),
+    { dia: 0, total: 0, produtores: 0 }
+  ) : null
+
   const barData = kpis?.top_municipios?.map(m => ({
     name: m.municipio,
     total: m.total,
@@ -70,6 +77,33 @@ export function GetecOverview({ kpis, loading }: GetecOverviewProps) {
           />
         </ErrorBoundary>
       </div>
+
+      {/* Atendimentos KPIs */}
+      {atendTotals && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <ErrorBoundary>
+            <KpiCard
+              label="Atendimentos Hoje"
+              value={formatNumber(atendTotals.dia)}
+              accentColor="yellow"
+            />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <KpiCard
+              label="Atendimentos no Ano"
+              value={formatNumber(atendTotals.total)}
+              accentColor="yellow"
+            />
+          </ErrorBoundary>
+          <ErrorBoundary>
+            <KpiCard
+              label="Produtores Atendidos"
+              value={formatNumber(atendTotals.produtores)}
+              accentColor="green"
+            />
+          </ErrorBoundary>
+        </div>
+      )}
 
       {/* Bar chart: Top 15 */}
       <div className="card p-4">

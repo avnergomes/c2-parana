@@ -1,6 +1,6 @@
 // src/pages/GetecPage.tsx
 import { useState } from 'react'
-import { useGetecKpis, useGetecMunicipios } from '@/hooks/useGetec'
+import { useGetecKpis, useGetecMunicipios, useGetecAtendimentos } from '@/hooks/useGetec'
 import { GetecOverview } from '@/components/getec/GetecOverview'
 import { GetecMunicipios } from '@/components/getec/GetecMunicipios'
 import { GetecExtensao } from '@/components/getec/GetecExtensao'
@@ -16,6 +16,7 @@ export function GetecPage() {
 
   const { data: kpis, isLoading: loadingKpis } = useGetecKpis()
   const { data: municipios, isLoading: loadingMunicipios } = useGetecMunicipios()
+  const { data: atendimentosMap } = useGetecAtendimentos()
 
   if (!isPro) {
     return (
@@ -61,7 +62,7 @@ export function GetecPage() {
       <div className="min-h-[400px]">
         <ErrorBoundary moduleName={activeTab}>
           {activeTab === 'overview' && (
-            <GetecOverview kpis={kpis!} loading={loadingKpis} />
+            <GetecOverview kpis={kpis!} loading={loadingKpis} atendimentosMap={atendimentosMap} />
           )}
           {activeTab === 'municipios' && (
             <GetecMunicipios municipios={municipios || []} loading={loadingMunicipios} />
