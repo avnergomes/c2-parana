@@ -67,7 +67,9 @@
       "Bash(grep -r \"LAYER_CONFIGS\\\\|rios\\\\|credito\" --include=*.ts --include=*.tsx .)",
       "Bash(grep -r credito_rural --include=*.ts --include=*.tsx /c/Users/avner/OneDrive/Documentos/GitHub/c2-parana/src)",
       "Bash(grep:*)",
-      "Bash(GETEC_USER=772708 GETEC_PASS=70835138 py scripts/etl_getec_extensao.py)"
+      "Bash(GETEC_USER=772708 GETEC_PASS=70835138 py scripts/etl_getec_extensao.py)",
+      "Bash(GETEC_USER=772708 GETEC_PASS=70835138 py scripts/etl_getec_atendimentos.py)",
+      "Bash(rtk gh:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
