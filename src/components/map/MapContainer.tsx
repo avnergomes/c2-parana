@@ -6,9 +6,12 @@ import { useMapState } from '@/hooks/useMapState'
 import { LayerToggle } from './LayerToggle'
 import { MapLegend } from './MapLegend'
 import { MunicipalityPopup } from './MunicipalityPopup'
+import { COPStatusPanel } from './COPStatusPanel'
+import { TimelineSlider } from './TimelineSlider'
 import { ClimaLayer } from './layers/ClimaLayer'
 import { QueimadaLayer } from './layers/QueimadaLayer'
 import { DengueLayer } from './layers/DengueLayer'
+import { IRTCLayer } from './layers/IRTCLayer'
 import { VbpLayer } from './layers/VbpLayer'
 import { CreditoRuralLayer } from './layers/CreditoRuralLayer'
 import { RiosLayer } from './layers/RiosLayer'
@@ -56,6 +59,10 @@ export function MapModule() {
   const [selectedFeature, setSelectedFeature] = useState<{ ibge: string; name: string } | null>(null)
   const { isPro } = useAuth()
   const geoJsonRef = useRef<L.GeoJSON | null>(null)
+
+  // Timeline state
+  const [timelineValue, setTimelineValue] = useState<string>(new Date().toISOString())
+  const [isTimelinePlaying, setIsTimelinePlaying] = useState(false)
 
   // Carregar GeoJSON dos municípios
   const { data: geoJSON } = useQuery({
@@ -203,12 +210,42 @@ export function MapModule() {
               <QueimadaLayer />
             </ErrorBoundary>
           )}
+
+          {/* Layer: IRTC - Índice de Risco Territorial Composto (coroplético) */}
+          {activeLayers.includes('irtc') && isPro && geoJSON && (
+            <ErrorBoundary moduleName="layer irtc">
+              <IRTCLayer />
+            </ErrorBoundary>
+          )}
         </LeafletMap>
 
         {/* Controles sobrepostos */}
         <LayerToggle activeLayers={activeLayers} onToggle={toggleLayer} />
         <MapLegend activeLayers={activeLayers} />
 
+        {/* COP Status Panel (painel operacional direito) */}
+        {isPro && (
+          <ErrorBoundary moduleName="cop status panel">
+            <COPStatusPanel
+              onMunicipalityClick={(ibge) => {
+                setSelectedFeature({ ibge, name: '' })
+                selectMunicipality(ibge)
+              }}
+            />
+          </ErrorBoundary>
+        )}
+
+        {/* Timeline Slider (controle temporal inferior) */}
+        {isPro && (
+          <TimelineSlider
+            value={timelineValue}
+            onChange={setTimelineValue}
+            isPlaying={isTimelinePlaying}
+            onTogglePlay={() => setIsTimelinePlaying(p => !p)}
+          />
+        )}
+
+        {/* Painel lateral de situação do município */}
         {selectedFeature && (
           <MunicipalityPopup
             ibgeCode={selectedFeature.ibge}
