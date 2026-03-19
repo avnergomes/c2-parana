@@ -17,6 +17,7 @@ import { CreditoRuralLayer } from './layers/CreditoRuralLayer'
 import { RiosLayer } from './layers/RiosLayer'
 import { ReservatoriosLayer } from './layers/ReservatoriosLayer'
 import { ManancialAlertsLayer } from './layers/ManancialAlertsLayer'
+import { AtendimentosGlowLayer } from './layers/AtendimentosGlowLayer'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { MapDataProvider } from '@/contexts/MapDataContext'
 import type { GeoJsonObject, Feature } from 'geojson'
@@ -190,6 +191,13 @@ export function MapModule() {
           {activeLayers.includes('credito') && isPro && geoJSON && (
             <ErrorBoundary moduleName="layer credito rural">
               <CreditoRuralLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Atendimentos GETEC (glow coroplético por hora) */}
+          {geoJSON && (
+            <ErrorBoundary moduleName="layer atendimentos glow">
+              <AtendimentosGlowLayer timeFilter={timelineValue} geoJSON={geoJSON} />
             </ErrorBoundary>
           )}
 

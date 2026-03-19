@@ -112,6 +112,24 @@ export function useGetecTimeline() {
   })
 }
 
+/** Daily attendance per municipality: { "YYYY-MM-DD": { "mun_code": count } } */
+export type DailyAtendimentosMap = Record<string, Record<string, number>>
+
+export function useGetecAtendimentosDaily() {
+  return useQuery({
+    queryKey: ['getec-atendimentos-daily'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('data_cache')
+        .select('data')
+        .eq('cache_key', 'getec_atendimentos_daily_pr')
+        .maybeSingle() as { data: DataCacheRow | null }
+      return (data?.data as DailyAtendimentosMap) || null
+    },
+    staleTime: 1000 * 60 * 60 * 6,
+  })
+}
+
 export function useGetecAtendimentos() {
   return useQuery({
     queryKey: ['getec-atendimentos'],

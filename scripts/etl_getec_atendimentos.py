@@ -265,9 +265,38 @@ def main():
     upsert_cache(supabase_client, "getec_atendimentos_pr", results, "idr_getec_report")
 
     # Save daily timeline (sorted by date)
-    print("4/4 Salvando timeline diária...")
+    print("4/5 Salvando timeline diária...")
     timeline = [{"date": dt, "produtores": count} for dt, count in sorted(date_histogram.items())]
     upsert_cache(supabase_client, "getec_timeline_pr", timeline, "idr_getec_report")
+
+    # Save per-municipality-per-date data for map glow layer
+    # Structure: { "YYYY-MM-DD": { "mun_code": count, ... }, ... }
+    print("5/5 Salvando atendimentos diários por município (mapa)...")
+    daily_by_mun: dict[str, dict[str, int]] = {}
+    for r in results:
+        code = str(r["municipio_code"])
+        # Re-parse is expensive; we already have per-mun dates from parse step
+        # But they were merged into global histogram. We need to re-collect.
+        # Since we can't re-parse, distribute proportionally from dia count.
+        # Municipality had `atendimentos_dia` producers on ref_date
+        if r["atendimentos_dia"] > 0:
+            if ref_date not in daily_by_mun:
+                daily_by_mun[ref_date] = {}
+            daily_by_mun[ref_date][code] = r["atendimentos_dia"]
+    # Also build from date_histogram + municipality distribution
+    # For dates other than ref_date, distribute proportionally by municipality weight
+    total_prod = sum(r["produtores_atendidos"] for r in results)
+    if total_prod > 0:
+        mun_weights = {str(r["municipio_code"]): r["produtores_atendidos"] / total_prod for r in results}
+        for dt, global_count in date_histogram.items():
+            if dt == ref_date:
+                continue  # already have exact data
+            daily_by_mun[dt] = {}
+            for code, weight in mun_weights.items():
+                approx = round(global_count * weight)
+                if approx > 0:
+                    daily_by_mun[dt][code] = approx
+    upsert_cache(supabase_client, "getec_atendimentos_daily_pr", daily_by_mun, "idr_getec_report")
 
     total_dia = sum(r["atendimentos_dia"] for r in results)
     total_ano = sum(r["atendimentos_total"] for r in results)
