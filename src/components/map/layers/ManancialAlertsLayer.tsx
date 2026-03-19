@@ -34,6 +34,7 @@ export function ManancialAlertsLayer() {
             key={m.locationid}
             center={[lat, lng]}
             radius={isCritico ? 10 : 7}
+            pane="markerPane"
             pathOptions={{
               fillColor: color,
               fillOpacity: 0.85,
