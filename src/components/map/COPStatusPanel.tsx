@@ -31,14 +31,14 @@ const SEVERITY_COLORS = {
   low: '#eab308',
 }
 
-const SEVERITY_LABELS = {
+const _SEVERITY_LABELS = {
   critical: 'Crítico',
   high: 'Alto',
   medium: 'Médio',
   low: 'Baixo',
 }
 
-export function COPStatusPanel({ onMunicipalityClick }: COPStatusPanelProps) {
+export function COPStatusPanel({ onMunicipalityClick: _onMunicipalityClick }: COPStatusPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const {
     irtcSummary,
@@ -105,7 +105,8 @@ export function COPStatusPanel({ onMunicipalityClick }: COPStatusPanelProps) {
 
   const onlineStations = useMemo(() => {
     if (!weatherStations.data) return 0
-    return weatherStations.data.filter((s) => s.is_online).length
+    // Estações com temperatura != null são consideradas "online"
+    return weatherStations.data.filter((s: any) => s.temperature !== null && s.temperature !== undefined).length
   }, [weatherStations.data])
 
   const lastUpdateTime = lastUpdate || new Date().toISOString()

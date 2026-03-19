@@ -95,3 +95,35 @@
     @apply bg-blue-900/40 text-status-info border border-blue-700/50 text-xs font-medium px-2 py-0.5 rounded-full;
   }
 }
+
+/* Timeline slider thumb styles */
+input[type='range'].slider-thumb::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f9fafb;
+  cursor: pointer;
+  border: 2px solid #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  transition: all 0.2s ease;
+}
+input[type='range'].slider-thumb::-webkit-slider-thumb:hover {
+  width: 20px;
+  height: 20px;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
+}
+input[type='range'].slider-thumb::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f9fafb;
+  cursor: pointer;
+  border: 2px solid #3b82f6;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+input[type='range'].slider-thumb::-moz-range-track {
+  background: transparent;
+  border: none;
+}

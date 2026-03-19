@@ -1,5 +1,3 @@
-'use client'
-
 import React, { useMemo } from 'react'
 import { Play, Pause } from 'lucide-react'
 
@@ -186,51 +184,7 @@ export function TimelineSlider({
         </div>
       </div>
 
-      <style jsx>{`
-        input[type='range']::-webkit-slider-thumb {
-          appearance: none;
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-          background: #f9fafb;
-          cursor: pointer;
-          border: 2px solid #3b82f6;
-          box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-          transition: all 0.2s ease;
-        }
-
-        input[type='range']::-webkit-slider-thumb:hover {
-          width: 20px;
-          height: 20px;
-          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
-        }
-
-        input[type='range']::-moz-range-thumb {
-          width: 16px;
-          height: 16px;
-          border-radius: 50%;
-          background: #f9fafb;
-          cursor: pointer;
-          border: 2px solid #3b82f6;
-          box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-          transition: all 0.2s ease;
-        }
-
-        input[type='range']::-moz-range-thumb:hover {
-          width: 20px;
-          height: 20px;
-          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.5);
-        }
-
-        input[type='range']::-moz-range-track {
-          background: transparent;
-          border: none;
-        }
-
-        input[type='range']::-moz-range-progress {
-          background-color: #3b82f6;
-        }
-      `}</style>
+      {/* Slider thumb styles injected via global CSS in index.css */}
     </div>
   )
 }
