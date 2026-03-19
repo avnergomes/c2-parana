@@ -5,6 +5,10 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
 serve(async (req) => {
   const signature = req.headers.get('stripe-signature')
+  if (!signature) {
+    return new Response(JSON.stringify({ error: 'Missing stripe-signature header' }), { status: 400 })
+  }
+
   const body = await req.text()
 
   const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, {
@@ -16,7 +20,7 @@ serve(async (req) => {
   try {
     event = await stripe.webhooks.constructEventAsync(
       body,
-      signature!,
+      signature,
       Deno.env.get('STRIPE_WEBHOOK_SECRET')!
     )
   } catch (err) {
@@ -96,7 +100,7 @@ serve(async (req) => {
     }
   } catch (err) {
     console.error('Webhook handler error:', err)
-    return new Response(JSON.stringify({ error: 'Handler failed' }), { status: 500 })
+    return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500 })
   }
 
   return new Response(JSON.stringify({ received: true }), {
