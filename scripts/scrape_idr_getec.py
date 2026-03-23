@@ -35,6 +35,8 @@ CLIENT_LIST_URL = f"{BASE_URL}/lista/lista_regcli.php"
 CLIENT_DETAIL_URL = f"{BASE_URL}/clientes/menu.php"
 CLIENT_BUSCA_URL = f"{BASE_URL}/busca/busca_regcli1.php"
 
+GETEC_USER = os.environ.get("GETEC_USER", "")
+GETEC_PASS = os.environ.get("GETEC_PASS", "")
 USUARIO = os.environ.get("IDR_GETEC_USUARIO", "")
 SENHA = os.environ.get("IDR_GETEC_SENHA", "")
 
