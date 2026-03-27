@@ -39,3 +39,8 @@ data/idr-getec-raw/
 # Misc
 *.pem
 *.tsbuildinfo
+
+# Claude Code
+.claude/
+CLAUDE.md
+.claudeignore
