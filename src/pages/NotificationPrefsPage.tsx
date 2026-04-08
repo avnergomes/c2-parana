@@ -1,7 +1,61 @@
 // src/pages/NotificationPrefsPage.tsx
-import { Settings, Mail, MessageCircle, Bell as BellIcon } from 'lucide-react'
+import { Settings, Mail, MessageCircle, Bell as BellIcon, ShieldCheck, ShieldAlert, ShieldX } from 'lucide-react'
 import { useNotificationPrefs, useUpdateNotificationPrefs } from '@/hooks/useNotifications'
 import type { NotificationPrefs } from '@/hooks/useNotifications'
+import { useBrowserNotificationPermission } from '@/hooks/useBrowserNotificationPermission'
+
+function BrowserPermissionCard() {
+  const { permission, isSupported, isGranted, isDenied, isDefault, request } = useBrowserNotificationPermission()
+
+  if (!isSupported) {
+    return (
+      <div className="card p-5 space-y-2">
+        <h2 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+          <ShieldX size={16} className="text-text-muted" />
+          Notificacoes do Navegador
+        </h2>
+        <p className="text-xs text-text-muted">
+          Este navegador nao suporta a API de Notification. Use um navegador moderno (Chrome, Firefox, Edge, Safari 16+).
+        </p>
+      </div>
+    )
+  }
+
+  const statusConfig = isGranted
+    ? { Icon: ShieldCheck, color: 'text-accent-green', bg: 'bg-accent-green/10 border-accent-green/30', label: 'Permitido', desc: 'O navegador vai exibir alertas mesmo quando a aba estiver em segundo plano.' }
+    : isDenied
+    ? { Icon: ShieldX, color: 'text-status-danger', bg: 'bg-status-danger/10 border-status-danger/30', label: 'Bloqueado', desc: 'Voce bloqueou notificacoes para este site. Desbloqueie nas configuracoes do navegador (cadeado na barra de endereco) para receber alertas.' }
+    : { Icon: ShieldAlert, color: 'text-status-warning', bg: 'bg-status-warning/10 border-status-warning/30', label: 'Nao configurado', desc: 'Permita notificacoes para receber alertas criticos do C2 Parana mesmo quando a aba nao estiver visivel.' }
+
+  const { Icon, color, bg, label, desc } = statusConfig
+
+  return (
+    <div className={`card p-5 space-y-3 border ${bg}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <Icon size={20} className={color} />
+          <div>
+            <h2 className="text-sm font-semibold text-text-primary">
+              Notificacoes do Navegador — <span className={color}>{label}</span>
+            </h2>
+            <p className="text-xs text-text-muted mt-1 max-w-md">{desc}</p>
+          </div>
+        </div>
+        {isDefault && (
+          <button
+            onClick={() => { void request() }}
+            className="btn-primary text-xs whitespace-nowrap"
+          >
+            Solicitar permissao
+          </button>
+        )}
+      </div>
+      {import.meta.env.DEV && (
+        <p className="text-[10px] text-text-muted font-mono">debug: Notification.permission = "{permission}"</p>
+      )}
+    </div>
+  )
+}
 
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -49,6 +103,9 @@ export function NotificationPrefsPage() {
           Configure como e quando receber alertas do sistema
         </p>
       </div>
+
+      {/* Browser permission status (Fase 2.B) */}
+      <BrowserPermissionCard />
 
       {/* Channels */}
       <div className="card p-5 space-y-1">
