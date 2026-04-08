@@ -538,10 +538,10 @@ def main():
     print(f"\nTop 10 municípios por IRTC:")
     for i, rec in enumerate(top10, 1):
         print(
-            f"  {i:>2}. {rec['municipality_name']:<30} "
+            f"  {i:>2}. {rec['municipality']:<30} "
             f"IRTC={rec['irtc_score']:>6.2f}  [{rec['risk_level']}]  "
-            f"(C={rec['r_clima']:.0f} S={rec['r_saude']:.0f} A={rec['r_ambiente']:.0f} "
-            f"H={rec['r_hidro']:.0f} Ar={rec['r_ar']:.0f})"
+            f"(C={rec['risk_clima']:.0f} S={rec['risk_saude']:.0f} A={rec['risk_ambiente']:.0f} "
+            f"H={rec['risk_hidro']:.0f} Ar={rec['risk_ar']:.0f})"
         )
 
     print("=" * 60)
