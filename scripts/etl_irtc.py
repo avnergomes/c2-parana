@@ -233,10 +233,21 @@ def calc_r_clima(temperature, humidity):
 
 
 def calc_r_saude(alert_level):
-    """Calcula risco de saúde (0-100) baseado no alert_level de dengue.
-    0→0, 1→25, 2→50, 3→100
+    """Calcula risco de saúde (0-100) baseado no alert_level do InfoDengue.
+
+    Escala oficial do InfoDengue (https://info.dengue.mat.br):
+      1 = verde   (condições nao favoraveis)         → R_saude 25
+      2 = amarelo (sinais de aumento)                → R_saude 50
+      3 = laranja (transmissao sustentada)           → R_saude 75
+      4 = vermelho (epidemia)                        → R_saude 100
+
+    Bug historico (corrigido aqui): a versao anterior usava {0,1,2,3}
+    como chaves, o que tratava o nivel 4 (epidemia, o pior) como
+    "nao mapeado" e retornava 0 (zero risco) — exatamente o oposto do
+    esperado, escondendo dos operadores os 20 municipios em estado de
+    epidemia em todo o Parana.
     """
-    mapping = {0: 0, 1: 25, 2: 50, 3: 100}
+    mapping = {1: 25, 2: 50, 3: 75, 4: 100}
     return mapping.get(int(alert_level or 0), 0)
 
 
