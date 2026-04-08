@@ -195,7 +195,17 @@ def fetch_recent_fire_counts(window_hours: int, name_lookup: dict[str, str]) -> 
 
 
 def fetch_river_alerts(name_lookup: dict[str, str]) -> dict[str, str]:
-    """Retorna pior alert_level por ibge_code."""
+    """Retorna o pior alert_level por ibge_code de cada municipio monitorado.
+
+    Inclui estacoes em estado 'normal' tambem (nao apenas alertas), para que
+    o log honestamente reflita a quantidade de municipios cobertos pelo
+    monitoramento de rios. O downstream nao muda — a avaliacao das regras
+    usa get(ibge, 'normal') como default, entao um municipio sem entrada
+    e tratado igual a um municipio com entrada 'normal'.
+
+    Quando o mesmo municipio tem multiplas estacoes, fica registrado o
+    pior alerta (priority = normal < attention < alert < emergency).
+    """
     records = postgrest_get("river_levels", select="municipality,alert_level")
     priority = {"normal": 0, "attention": 1, "alert": 2, "emergency": 3}
     by_ibge: dict[str, str] = {}
@@ -207,8 +217,8 @@ def fetch_river_alerts(name_lookup: dict[str, str]) -> dict[str, str]:
         ibge = match_name_to_ibge(mun, name_lookup)
         if not ibge:
             continue
-        current = by_ibge.get(ibge, "normal")
-        if priority.get(level, 0) > priority.get(current, 0):
+        existing = by_ibge.get(ibge)
+        if existing is None or priority.get(level, 0) > priority.get(existing, 0):
             by_ibge[ibge] = level
     return by_ibge
 
