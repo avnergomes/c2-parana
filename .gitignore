@@ -40,6 +40,10 @@ data/idr-getec-raw/
 *.pem
 *.tsbuildinfo
 
+# Supabase CLI cache (link state, project-ref, etc.)
+supabase/.temp/
+supabase/.branches/
+
 # Claude Code
 .claude/
 CLAUDE.md
