@@ -8,10 +8,12 @@ import { LoadingScreen } from '@/components/ui/LoadingScreen'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { LgpdBanner } from '@/components/ui/LgpdBanner'
 import { useNoticiasRealtime } from '@/hooks/useNoticiasRealtime'
+import { useNotificationsRealtime } from '@/hooks/useNotificationsRealtime'
 
 export function Layout() {
-  // Habilitar atualizacoes em tempo real de noticias
+  // Habilitar atualizacoes em tempo real de noticias e alertas
   useNoticiasRealtime()
+  useNotificationsRealtime()
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background">
