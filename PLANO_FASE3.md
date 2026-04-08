@@ -1,8 +1,8 @@
 # Plano de Implementação — Fase 3 (Intelligence)
 
-**Versão:** 1.0
-**Data:** 2026-04-08
-**Status:** Em execução (3.A iniciada)
+**Versão:** 1.1
+**Data:** 2026-04-08 (atualizado após sessão de execução)
+**Status:** ✅ **3.A shipada e validada em produção** — fases B-G pendentes
 **Predecessor:** `PLANO_IMPLEMENTACAO_C4ISR.md` seção "FASE 3 — Fusão de Dados e Inteligência"
 
 ---
@@ -35,7 +35,7 @@ Descoberto via exploração do schema em 2026-04-07/08:
 
 | Recurso | Estado | Observação |
 |---|---|---|
-| `climate_data` table | ✅ | `ibge_code, temperature, humidity, observed_at` — **sem precipitation** |
+| `climate_data` table | ✅ | `ibge_code, temperature, humidity, pressure, wind_speed, wind_direction, **precipitation**, observed_at, ...` (15 colunas — precipitation **sim existe**, populada por INMET e Open-Meteo) |
 | `fire_spots` table | ✅ | `municipality, acq_date, latitude, longitude, brightness` |
 | `river_levels` table | ✅ | `station_code, municipality, alert_level` (normal/attention/alert/emergency) |
 | `air_quality` table | ✅ | `city, aqi` |
@@ -46,16 +46,83 @@ Descoberto via exploração do schema em 2026-04-07/08:
 
 ## 3. Gaps críticos bloqueando Fase 3
 
-1. **`climate_data` não persiste precipitação** — impede qualquer regra que envolva
-   chuva acumulada (ex: risco de enchente, dias sem chuva, risco de incêndio por
-   seca). Precisa ser corrigido em `etl_clima.py` antes ou em paralelo à Fase 3.
+1. ~~**`climate_data` não persiste precipitação**~~ — **CORRIGIDO conceitualmente:** a coluna
+   `precipitation` (instantâneo em mm) já existe e é populada. O gap real é a falta
+   de derivado **24h acumulado** — não é uma coluna nova, é uma agregação que pode
+   ser feita por view ou no `etl_correlations.py`. A regra seed "Precipitação Intensa"
+   foi corrigida na migration 015 pra usar `precipitation` (instantâneo > 100mm) em vez
+   do não-existente `precipitation_24h`.
 2. **Sem histórico temporal agregado** — `climate_data` guarda observações
    instantâneas, não séries derivadas tipo "dias consecutivos sem chuva" ou
    "precipitação acumulada 72h". Fase 3 precisa calcular essas features on-the-fly
    ou materializá-las numa nova view/tabela.
 3. **Matching de município inconsistente** — `fire_spots.municipality` e
    `river_levels.municipality` são texto livre; precisam ser reconciliados ao
-   `ibge_code` via lookup por nome (já existe pattern no `etl_irtc.py`).
+   `ibge_code` via lookup por nome (já existe pattern no `etl_irtc.py`, replicado
+   em `etl_correlations.py`).
+
+---
+
+## 3.1 Execução — sessão 2026-04-07/08 (commits no main)
+
+Esta seção é um log do que foi efetivamente executado nesta sessão. Os ✅ são
+verificados em produção real (logs do GitHub Actions + queries SQL no Supabase).
+
+### Commits shipados (em ordem cronológica)
+
+| Commit | Tipo | Escopo | Validado? |
+|---|---|---|---|
+| `9f2b2f5` | feat | **Fase 3.A** — motor composite engine, migration 014, ETL, cron, plan doc | ✅ |
+| `0ca2e52` | fix | URL encoding `+` → `Z` em timestamps de query (HTTP 400 PostgREST) | ✅ |
+| `d3588d0` | fix | Migration 015 — IRTC Crítico schema composite + Precipitação field | ✅ |
+| `5b75120` | fix | `postgrest_post(on_conflict=...)` em etl_correlations | ✅ |
+| `a989863` | fix | etl_irtc — column rename (`r_clima→risk_clima`, `municipality_name→municipality`) + on_conflict | ✅ |
+| `e288aad` | fix | etl_irtc — refs residuais no Top 10 print causando KeyError pós-rename | ✅ |
+| `de440e6` | fix | etl_correlations — `fetch_river_alerts` inclui rivers em "normal" pra log honesto | ✅ |
+| `(esta sessão)` | fix | etl_irtc — `calc_r_saude` mapping `{1,2,3,4}` em vez de `{0,1,2,3}` (ignora epidemia) | ⏳ |
+
+### Bugs silenciosos descobertos e fixados
+
+Bugs latentes que **passaram despercebidos por dias-semanas em produção** porque
+não geravam erro visível em GitHub Actions / dashboard:
+
+1. **`postgrest_post` / `postgrest_upsert` sem `on_conflict`** — afetava `etl_correlations.py`
+   E `etl_irtc.py`. Health records nunca atualizavam após o primeiro insert. Em
+   `etl_irtc` se combinava com bug #2 escondendo um bug ainda pior.
+2. **`etl_irtc.py` enviando colunas que não existem em `irtc_scores`** — `municipality_name`
+   vs `municipality`, `r_clima` vs `risk_clima` etc. **Resultado: a tabela ficou
+   completamente vazia desde que a migration 011 foi aplicada (~19 dias).**
+   Frontend (`useIRTC`, `IRTCLayer`, `MunicipalityPopup`) silenciosamente
+   mostrava heatmap vazio. Cron-irtc reportava status "success" no Actions
+   apesar de o upsert falhar com PGRST204. Cleanup: ETL agora popula 399 munis.
+3. **Realtime publication** sem `news_items` nem `notifications` (descoberto na sessão
+   anterior, fixado na migration 013). Idem efeito silencioso.
+4. **`fetch_river_alerts` filtrava rivers normais** — log dizia `rios=0` quando havia
+   8 estações operacionais, todas em normal. Ninguém quebrado, mas observabilidade
+   misleading.
+5. **`calc_r_saude` mapping wrong** — escala InfoDengue é `{1,2,3,4}` mas o ETL usa
+   `{0,1,2,3}`, tratando epidemia (nível 4) como zero risco. **Os 20 municípios
+   em estado de epidemia em todo o PR estavam sendo escondidos do IRTC.**
+
+### Migrations aplicadas em produção
+
+| # | Migration | Aplicada via | Verificada? |
+|---|---|---|---|
+| 010-013 | (criadas em sessão anterior, aplicadas via `db push`) | CLI | ✅ |
+| 014 | `composite_alert_rules.sql` (3 regras seed) | `npx supabase db push` | ✅ (4 com IRTC Crítico) |
+| 015 | `fix_composite_rules.sql` (UPDATE de 2 regras pra schema novo) | `npx supabase db push` | ✅ |
+
+### Validações empíricas em produção
+
+| Métrica | Antes | Depois |
+|---|---|---|
+| `irtc_scores` total rows | 0 | **399** |
+| `river_levels` total rows | 0 (timing) → 8 | **8** |
+| `etl_correlations` clima query | `HTTP 400` | `7 munis OK` |
+| `etl_correlations` rios log | `rios=0` | `rios=8` |
+| `etl_correlations` irtc log | `irtc=0` | `irtc=399` |
+| `etl_irtc` upsert | `PGRST204 error` | `399 upserted` |
+| `etl_irtc` exit status | `failure` | `success` |
 
 ---
 
@@ -64,7 +131,7 @@ Descoberto via exploração do schema em 2026-04-07/08:
 Dividida priorizando **entrega de valor incremental**. Cada sub-fase é shippable
 sozinha e não depende das seguintes.
 
-### Fase 3.A — Correlações heurísticas simples ⏳ Em execução
+### Fase 3.A — Correlações heurísticas simples ✅ Concluída
 
 **Objetivo:** Primeiro motor de fusão multi-domínio via regras booleanas
 compostas. Sem ML. Sem histórico complexo. Entrega rápida.
@@ -238,25 +305,66 @@ Pragmática, priorizando alavancagem de valor:
 
 ---
 
-## 6.1 Pendência descoberta na execução da 3.A
+## 6.1 Pendências descobertas na execução
 
-A regra seed "IRTC Crítico" da migration 012 já tem `domain='composto'` mas
-usa o schema de `condition` antigo (formato plano: `{field, operator,
-threshold}`). O motor `etl_correlations.py` só reconhece o schema novo
-(`{type: 'composite', logic, clauses[]}`), então essa regra fica órfã: nem o
-`etl_alerts_engine` processa regras 'composto', nem o novo motor processa
-condições planas.
+### ✅ Resolvido — Regra "IRTC Crítico" com schema legado
+~~A regra seed da migration 012 estava em formato `{field, operator, threshold}`
+plano e ficava órfã entre os dois motores.~~ **Resolvido na migration 015**
+(commit `d3588d0`) — agora está em formato composite:
+`{type: 'composite', logic: 'AND', clauses: [{field: 'irtc.score', op: '>', value: 75}]}`
+e é avaliada normalmente por `etl_correlations.py`.
 
-**Mitigação:** criar uma migration futura que atualiza essa regra pro schema
-novo:
+### ✅ Resolvido — `calc_r_saude` ignorava nível 4 do InfoDengue
+A função usava `mapping = {0:0, 1:25, 2:50, 3:100}` mas a escala oficial do
+InfoDengue é `{1: verde, 2: amarelo, 3: laranja, 4: vermelho}`. Os 20 municípios
+em estado de **epidemia (nível 4)** caíam no `default=0` e recebiam risco zero —
+o oposto do correto. Corrigido para `mapping = {1:25, 2:50, 3:75, 4:100}`. Os
+munis epidêmicos agora aparecem corretamente no Top 10 do ETL IRTC.
+
+### 🔴 Aberto — `dengue_data` está obsoleta (~1 ano stale)
+O `etl_saude.py` parou de atualizar em algum momento. A semana epidemiológica
+mais recente em produção é `2025/4` (verificado em 2026-04-08). Ou seja, o
+sistema está calculando IRTC e disparando regras de saúde com dados de **mais
+de um ano atrás**. Bug de ETL silencioso pra investigar separadamente.
+
+**Verificação:**
 ```sql
-UPDATE alert_rules
-SET condition = '{"type":"composite","logic":"AND","clauses":[{"field":"irtc.score","op":">","value":75}]}'::jsonb
-WHERE name = 'IRTC Critico' AND domain = 'composto';
+SELECT MAX(year) || '/' || MAX(epidemiological_week) FROM dengue_data;
+-- Esperado: 2026/<semana atual>; Observado: 2025/4
 ```
 
-Não é urgente porque o IRTCLayer no mapa já exibe visualmente o score — só
-não dispara notification automática ainda.
+**Possíveis causas a investigar:**
+- Cron `cron-saude.yml` pausado/falhando silenciosamente nos GitHub Actions
+- API InfoDengue mudou de formato/endpoint
+- Bug no parser do ETL
+
+### 🔴 Aberto — IRTC calibração: cap em 25 quando só dengue contribui
+A fórmula `IRTC = 0.25*R_clima + 0.25*R_saude + 0.20*R_ambiente + 0.15*R_hidro + 0.15*R_ar`
+tem um cap matemático: o R_saude máximo (100) sozinho contribui apenas
+`0.25 * 100 = 25` — dentro da faixa "baixo" (0-25). Para um município entrar
+em "médio" (26-50), "alto" (51-75) ou "crítico" (>75), **múltiplos domínios**
+precisam contribuir simultaneamente.
+
+Mas a cobertura real é desigual:
+- Climate: ~12 estações INMET (cobertura mínima do PR)
+- Fire spots: depende de eventos detectados pela NASA FIRMS (atualmente 2 no PR todo)
+- River levels: 8 estações ANA
+- Air quality: 4 cidades (capitais com AQICN)
+- Dengue: 399 municípios (cobertura completa via InfoDengue)
+
+**Resultado prático**: a maioria dos 399 municípios só tem dengue como input,
+ficam travados em IRTC ≤ 25 (faixa "baixo") permanentemente. **O IRTCLayer no
+mapa nunca mostra nada além de verde**, mesmo durante eventos extremos
+isolados.
+
+**Mitigações possíveis (a discutir com stakeholders):**
+- Aumentar `W_saude` de 0.25 pra 0.40 (dengue sozinho pode chegar a 40)
+- Capar agressivamente: epidemia → R_saude=200 truncado a 100
+- Reformular pra "IRTC = max disponível" em vez de "IRTC = média ponderada"
+- Estender cobertura das outras fontes (etl_clima cobrir mais estações INMET)
+- Aceitar que "baixo" é o valor honesto até cobertura aumentar (calibrar o
+  IRTC pra ser proporcional ao **% de risco máximo possível dado os dados
+  disponíveis**, não ao máximo absoluto)
 
 ---
 
