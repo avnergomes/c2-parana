@@ -116,10 +116,21 @@ def load_municipalities() -> dict[str, str]:
         return {}
 
 
+def _utc_iso_z(dt: datetime) -> str:
+    """Formata datetime como ISO8601 com sufixo 'Z' em vez de '+00:00'.
+
+    Necessario porque o caractere '+' em query strings URL e interpretado
+    como espaco por RFC 3986 — passando '+00:00' via GET da ao PostgREST
+    uma timestamp com espaco literal (' 00:00') e resulta em HTTP 400.
+    O sufixo 'Z' evita o problema sem precisar URL-encodar manualmente.
+    """
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def fetch_recent_climate(window_hours: int) -> dict[str, dict]:
     """Retorna climate_data agregado por ibge_code com max temp e min humidity
     na janela temporal."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_hours)).isoformat()
+    cutoff = _utc_iso_z(datetime.now(timezone.utc) - timedelta(hours=window_hours))
     records = postgrest_get(
         "climate_data",
         select="ibge_code,temperature,humidity,observed_at",
@@ -319,7 +330,7 @@ def eval_rule(rule: dict, ctx: dict) -> bool:
 def recently_fired(rule_id: str, ibge_code: str, cooldown_minutes: int) -> bool:
     """Retorna True se ja existe uma notification dessa regra+municipio
     dentro do window de cooldown."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)).isoformat()
+    cutoff = _utc_iso_z(datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes))
     records = postgrest_get(
         "notifications",
         select="id",
