@@ -67,7 +67,14 @@ def postgrest_get(table, select="*", params=None):
 
 
 def postgrest_upsert(table, records, on_conflict="ibge_code"):
-    """Faz POST (upsert) na API PostgREST do Supabase."""
+    """Faz POST (upsert) na API PostgREST do Supabase.
+
+    O parametro on_conflict e passado via query string (?on_conflict=<coluna>)
+    porque o header Prefer=resolution=merge-duplicates sozinho so resolve
+    contra a primary key. Para tabelas cuja chave logica (cache_key, ibge_code)
+    e um UNIQUE constraint separado da PK, o conflict target precisa ser
+    explicito. Sem ele, o PostgREST tenta INSERT puro e viola a constraint.
+    """
     if not records:
         return True
     upsert_headers = {**HEADERS, "Prefer": "resolution=merge-duplicates"}
@@ -75,6 +82,8 @@ def postgrest_upsert(table, records, on_conflict="ibge_code"):
     for i in range(0, len(records), 200):
         batch = records[i:i + 200]
         url = f"{SUPABASE_URL}/rest/v1/{table}"
+        if on_conflict:
+            url += f"?on_conflict={on_conflict}"
         resp = requests.post(url, headers=upsert_headers, json=batch, timeout=30)
         if resp.status_code not in (200, 201):
             print(f"  ERRO upsert {table} lote {i}: HTTP {resp.status_code} - {resp.text[:300]}")
@@ -453,12 +462,12 @@ def main():
 
         irtc_records.append({
             "ibge_code": ibge_code,
-            "municipality_name": mun_name,
-            "r_clima": round(r_clima, 2),
-            "r_saude": round(r_saude, 2),
-            "r_ambiente": round(r_ambiente, 2),
-            "r_hidro": round(r_hidro, 2),
-            "r_ar": round(r_ar, 2),
+            "municipality": mun_name,
+            "risk_clima": round(r_clima, 2),
+            "risk_saude": round(r_saude, 2),
+            "risk_ambiente": round(r_ambiente, 2),
+            "risk_hidro": round(r_hidro, 2),
+            "risk_ar": round(r_ar, 2),
             "irtc_score": irtc,
             "risk_level": risk_level,
             "calculated_at": now,
