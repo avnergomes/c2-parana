@@ -59,13 +59,29 @@ def postgrest_get(table: str, select: str = "*", params: dict | None = None) -> 
     return resp.json()
 
 
-def postgrest_post(table: str, records: list, prefer: str = "return=minimal") -> bool:
+def postgrest_post(
+    table: str,
+    records: list,
+    prefer: str = "return=minimal",
+    on_conflict: str | None = None,
+) -> bool:
+    """POST no PostgREST com suporte a upsert por coluna UNIQUE nao-PK.
+
+    Quando `on_conflict` e passado, a URL recebe `?on_conflict=<coluna>` e
+    o PostgREST usa essa coluna para resolver conflitos em vez da PK. Isso
+    e necessario para tabelas onde a chave logica (ex: data_cache.cache_key)
+    e um UNIQUE constraint separado da PK (id UUID). Sem esse parametro, o
+    header Prefer=resolution=merge-duplicates sozinho nao basta e o upsert
+    falha com HTTP 409 violacao de constraint.
+    """
     if not records:
         return True
     post_headers = {**HEADERS, "Prefer": prefer}
     for i in range(0, len(records), 200):
         batch = records[i:i + 200]
         url = f"{SUPABASE_URL}/rest/v1/{table}"
+        if on_conflict:
+            url += f"?on_conflict={on_conflict}"
         resp = requests.post(url, headers=post_headers, json=batch, timeout=30)
         if resp.status_code not in (200, 201, 204):
             print(f"  ERRO POST {table} lote {i}: HTTP {resp.status_code} - {resp.text[:300]}")
@@ -486,7 +502,12 @@ def main() -> None:
         "source": "etl_correlations",
         "fetched_at": start.isoformat(),
     }
-    postgrest_post("data_cache", [health_record], prefer="resolution=merge-duplicates,return=minimal")
+    postgrest_post(
+        "data_cache",
+        [health_record],
+        prefer="resolution=merge-duplicates,return=minimal",
+        on_conflict="cache_key",
+    )
 
     print("\n" + "=" * 60)
     print(f"ETL Correlations concluido em {duration:.1f}s  status={status}")
