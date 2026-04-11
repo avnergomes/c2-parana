@@ -584,9 +584,13 @@ def main():
         if len(errors) > 0 and (firms_count > 0 or aqicn_count > 0 or ana_count > 0):
             status = "partial"
 
+        # Schema (migration 001_initial_schema.sql): data_cache columns are
+        # cache_key, data (JSONB), source, fetched_at, expires_at, metadata.
+        # Prior code sent key/value/updated_at which do not exist, producing
+        # silent PGRST204 errors on every run.
         health_record = {
-            "key": "etl_health_ambiente",
-            "value": {
+            "cache_key": "etl_health_ambiente",
+            "data": {
                 "last_run": start_time.isoformat(),
                 "status": status,
                 "firms_spots": firms_count,
@@ -595,19 +599,20 @@ def main():
                 "duration_seconds": duration,
                 "errors": errors,
             },
-            "updated_at": datetime.now().isoformat(),
+            "source": "etl_ambiente",
+            "fetched_at": datetime.now().isoformat(),
         }
 
         # Tentar upsert
         try:
             supabase.table("data_cache").upsert(
                 health_record,
-                on_conflict="key"
+                on_conflict="cache_key"
             ).execute()
         except Exception as e:
             if "no unique or exclusion constraint" in str(e):
                 # Fallback: deletar antigo e inserir novo
-                supabase.table("data_cache").delete().eq("key", "etl_health_ambiente").execute()
+                supabase.table("data_cache").delete().eq("cache_key", "etl_health_ambiente").execute()
                 supabase.table("data_cache").insert(health_record).execute()
             else:
                 raise
