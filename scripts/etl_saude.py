@@ -18,6 +18,13 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 CURRENT_YEAR = datetime.now().year
 
+HTTP_SESSION = requests.Session()
+HTTP_SESSION.headers.update({
+    "User-Agent": "c2-parana-etl/1.0 (+https://github.com/avnergomes/c2-parana)",
+    "Accept": "application/json",
+})
+REQUEST_TIMEOUT = (10, 20)
+
 # =====================================================
 # ESTRATEGIA: Dois tiers de municipios
 # Tier 1 (50 maiores): ~80% da populacao PR -> rodar SEMPRE
@@ -184,10 +191,15 @@ def fetch_dengue_municipality(mun: dict, limiter: AdaptiveRateLimiter) -> dict:
                 "mun_name": mun_name,
             }
 
+        # Aplicar backoff adaptativo ANTES de cada tentativa
+        limiter.wait()
+
         url = f"https://info.dengue.mat.br/api/alertcity?geocode={mun_ibge}&disease=dengue&format=json&ew_start=1&ew_end=52&ey_start={CURRENT_YEAR - 1}&ey_end={CURRENT_YEAR}"
 
         try:
-            resp = requests.get(url, timeout=15)
+            print(f"[probe] GET {mun_name} attempt={attempt}", flush=True)
+            resp = HTTP_SESSION.get(url, timeout=REQUEST_TIMEOUT)
+            print(f"[probe] GOT {mun_name} status={resp.status_code}", flush=True)
 
             if resp.status_code == 429:
                 limiter.on_429()
@@ -282,8 +294,6 @@ def fetch_dengue_municipality(mun: dict, limiter: AdaptiveRateLimiter) -> dict:
                     "mun_ibge": mun_ibge,
                     "mun_name": mun_name,
                 }
-
-        limiter.wait()
 
     # Fallback (nunca deve chegar aqui, mas segurança)
     return {
@@ -424,8 +434,8 @@ def main():
     print(f"Total: {len(municipios)} municipios", flush=True)
 
     print("[probe] before fetch_dengue_concurrent", flush=True)
-    # Fetch concorrente com 5 workers
-    dengue_data, stats = fetch_dengue_concurrent(municipios, max_workers=5)
+    # Fetch concorrente com 2 workers (reduzido de 5 para ser gentil com InfoDengue)
+    dengue_data, stats = fetch_dengue_concurrent(municipios, max_workers=2)
     print(f"[probe] fetch_dengue_concurrent returned: {len(dengue_data)} records", flush=True)
 
     # Upsert dengue data
