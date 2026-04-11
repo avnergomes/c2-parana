@@ -398,7 +398,9 @@ def upsert_etl_health(supabase, health_record: dict):
 
 
 def main():
+    print("[probe] main() entry, before create_client", flush=True)
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("[probe] create_client returned", flush=True)
 
     start_time = time.time()
 
@@ -419,10 +421,12 @@ def main():
         print("=== MODO RAPIDO: Top 50 municipios (Tier 1) ===")
         municipios = TIER1_MUNICIPIOS
 
-    print(f"Total: {len(municipios)} municipios")
+    print(f"Total: {len(municipios)} municipios", flush=True)
 
+    print("[probe] before fetch_dengue_concurrent", flush=True)
     # Fetch concorrente com 5 workers
     dengue_data, stats = fetch_dengue_concurrent(municipios, max_workers=5)
+    print(f"[probe] fetch_dengue_concurrent returned: {len(dengue_data)} records", flush=True)
 
     # Upsert dengue data
     records_saved = 0
@@ -447,8 +451,10 @@ def main():
         "errors": stats["errors"],
     }
 
+    print("[probe] before upsert_etl_health", flush=True)
     # Upsert ETL health
     upsert_etl_health(supabase, health_record)
+    print("[probe] after upsert_etl_health", flush=True)
 
     print("=" * 60)
     print(f"ETL Saude concluido!")
