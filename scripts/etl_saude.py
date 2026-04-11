@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """ETL Saude: InfoDengue por municipio PR - versao otimizada com concorrencia e adaptive backoff."""
 
+import json
 import os
 import time
+from pathlib import Path
+
 import requests
 import threading
 from datetime import datetime
@@ -163,8 +166,30 @@ class AdaptiveRateLimiter:
             return self.circuit_breaker_open
 
 
+PR_MUNICIPIOS_JSON = Path(__file__).parent / "pr_municipios.json"
+
+
 def get_full_pr_municipalities():
-    """Busca lista completa de municipios PR do IBGE."""
+    """
+    Retorna lista completa de 399 municipios PR.
+
+    Fonte primaria: scripts/pr_municipios.json (cacheado no repo, estavel).
+    Fallback: IBGE API live (usado apenas se o JSON nao existir, por ex. em
+    dev environment antes do primeiro commit do arquivo).
+
+    A API do IBGE dava connect timeout intermitente do runner GitHub Actions,
+    deixando o ETL cair silenciosamente no TIER1 (50 munis) mesmo em
+    FULL_RUN=true. Hoje usamos o JSON estatico como fonte de verdade.
+    """
+    if PR_MUNICIPIOS_JSON.exists():
+        try:
+            with PR_MUNICIPIOS_JSON.open(encoding="utf-8") as f:
+                data = json.load(f)
+            print(f"  Lista de municipios carregada do JSON estatico ({len(data)} munis)")
+            return data
+        except Exception as e:
+            print(f"  Erro ao ler {PR_MUNICIPIOS_JSON.name}: {e} - tentando IBGE API")
+
     url = "https://servicodados.ibge.gov.br/api/v1/localidades/estados/41/municipios"
     try:
         resp = requests.get(url, timeout=30)
@@ -393,13 +418,21 @@ def upsert_dengue(supabase, records: list) -> int:
 
 
 def upsert_etl_health(supabase, health_record: dict):
-    """Upsert de ETL health tracking na tabela data_cache."""
+    """
+    Upsert de ETL health tracking na tabela data_cache.
+
+    Schema real (migration 001_initial_schema.sql): colunas sao cache_key,
+    data (JSONB), source, fetched_at, expires_at, metadata. O codigo
+    anterior enviava cache_value/updated_at que nao existem, resultando em
+    PGRST204 silencioso a cada run.
+    """
     try:
         supabase.table("data_cache").upsert(
             {
                 "cache_key": "etl_health_saude",
-                "cache_value": health_record,
-                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "data": health_record,
+                "source": "etl_saude",
+                "fetched_at": datetime.utcnow().isoformat() + "Z",
             },
             on_conflict="cache_key"
         ).execute()
