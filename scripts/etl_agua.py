@@ -117,21 +117,29 @@ def upsert_cache(supabase_client, cache_key: str, data, source: str):
 
 
 def upsert_health_tracking(supabase_client, health_data):
-    """Upsert health tracking record."""
+    """
+    Upsert health tracking record.
+
+    Schema (migration 001_initial_schema.sql): data_cache columns are
+    cache_key, data (JSONB), source, fetched_at, expires_at, metadata.
+    Prior code sent key/value/updated_at which do not exist, producing
+    silent PGRST204 errors on every run.
+    """
     health_record = {
-        "key": "etl_health_agua",
-        "value": health_data,
-        "updated_at": datetime.now().isoformat(),
+        "cache_key": "etl_health_agua",
+        "data": health_data,
+        "source": "etl_agua",
+        "fetched_at": datetime.now().isoformat(),
     }
 
     try:
         supabase_client.table("data_cache").upsert(
             health_record,
-            on_conflict="key"
+            on_conflict="cache_key"
         ).execute()
     except Exception as e:
         if "no unique or exclusion constraint" in str(e):
-            supabase_client.table("data_cache").delete().eq("key", "etl_health_agua").execute()
+            supabase_client.table("data_cache").delete().eq("cache_key", "etl_health_agua").execute()
             supabase_client.table("data_cache").insert(health_record).execute()
         else:
             raise
