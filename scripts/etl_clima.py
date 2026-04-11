@@ -512,10 +512,13 @@ def main():
     duration_seconds = time.time() - start_time
 
     # Upsert ETL health record
+    # Schema (migration 001_initial_schema.sql): data_cache columns are
+    # cache_key, data (JSONB), source, fetched_at, expires_at, metadata.
+    # Prior code was sending "key" + flat health fields as top-level
+    # columns, none of which exist, producing silent PGRST204 errors.
     print("\nGravando health check do ETL...")
     try:
-        health_record = {
-            "key": "etl_health_clima",
+        health_data = {
             "last_run": now.isoformat(),
             "status": etl_status,
             "inmet_stations_ok": inmet_ok,
@@ -524,11 +527,16 @@ def main():
             "total_records": len(all_records),
             "duration_seconds": round(duration_seconds, 2),
             "errors": errors_log,
-            "updated_at": now.isoformat(),
+        }
+        health_record = {
+            "cache_key": "etl_health_clima",
+            "data": health_data,
+            "source": "etl_clima",
+            "fetched_at": now.isoformat(),
         }
         supabase.table("data_cache").upsert(
             health_record,
-            on_conflict="key"
+            on_conflict="cache_key"
         ).execute()
         print(f"Health check gravado: status={etl_status} | duração={duration_seconds:.2f}s")
     except Exception as e:
