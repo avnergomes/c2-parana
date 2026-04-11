@@ -95,7 +95,10 @@ class AdaptiveRateLimiter:
     def __init__(self, initial_delay_ms=100):
         self.base_delay_ms = initial_delay_ms
         self.current_delay_ms = initial_delay_ms
-        self.lock = threading.Lock()
+        # RLock (not Lock) because check_circuit_breaker() acquires the lock
+        # and then calls get_error_rate() which also acquires it — a plain
+        # Lock would self-deadlock on the first worker call.
+        self.lock = threading.RLock()
 
         # Rastreamento de erros global
         self.total_requests = 0
