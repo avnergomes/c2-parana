@@ -200,9 +200,7 @@ def fetch_dengue_municipality(mun: dict, limiter: AdaptiveRateLimiter) -> dict:
         url = f"https://info.dengue.mat.br/api/alertcity?geocode={mun_ibge}&disease=dengue&format=json&ew_start=1&ew_end=52&ey_start={CURRENT_YEAR - 1}&ey_end={CURRENT_YEAR}"
 
         try:
-            print(f"[probe] GET {mun_name} attempt={attempt}", flush=True)
             resp = HTTP_SESSION.get(url, timeout=REQUEST_TIMEOUT)
-            print(f"[probe] GOT {mun_name} status={resp.status_code}", flush=True)
 
             if resp.status_code == 429:
                 limiter.on_429()
@@ -411,9 +409,7 @@ def upsert_etl_health(supabase, health_record: dict):
 
 
 def main():
-    print("[probe] main() entry, before create_client", flush=True)
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    print("[probe] create_client returned", flush=True)
 
     start_time = time.time()
 
@@ -436,10 +432,8 @@ def main():
 
     print(f"Total: {len(municipios)} municipios", flush=True)
 
-    print("[probe] before fetch_dengue_concurrent", flush=True)
     # Fetch concorrente com 2 workers (reduzido de 5 para ser gentil com InfoDengue)
     dengue_data, stats = fetch_dengue_concurrent(municipios, max_workers=2)
-    print(f"[probe] fetch_dengue_concurrent returned: {len(dengue_data)} records", flush=True)
 
     # Upsert dengue data
     records_saved = 0
@@ -464,10 +458,8 @@ def main():
         "errors": stats["errors"],
     }
 
-    print("[probe] before upsert_etl_health", flush=True)
     # Upsert ETL health
     upsert_etl_health(supabase, health_record)
-    print("[probe] after upsert_etl_health", flush=True)
 
     print("=" * 60)
     print(f"ETL Saude concluido!")
