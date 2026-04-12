@@ -49,11 +49,11 @@ export function useDengueSerie(ibgeCode?: string, semanas = 12) {
         // Com filtro por município: limitar pelas semanas solicitadas
         query = query.eq('ibge_code', ibgeCode).limit(semanas)
       } else {
-        // State-wide: filtrar pelo ano corrente para não puxar dados antigos
-        // acumulados de runs anteriores. Com 399 municípios × ~4 semanas
-        // armazenadas pelo ETL, total é ~1596 rows — dentro do limite.
-        const currentYear = new Date().getFullYear()
-        query = query.gte('year', currentYear).limit(semanas * 400)
+        // State-wide: buscar todos os dados disponíveis no banco.
+        // O ETL armazena ~4 semanas por município por run, mas dados
+        // históricos de runs anteriores acumulam. O chart agrega por
+        // semana, então precisamos de todos os registros disponíveis.
+        query = query.limit(10000)
       }
 
       const { data } = await query as { data: Pick<DengueDataRow, 'ibge_code' | 'municipality_name' | 'epidemiological_week' | 'year' | 'cases' | 'alert_level'>[] | null }
