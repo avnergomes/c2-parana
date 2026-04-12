@@ -33,4 +33,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GETEC_USER: ${{ secrets.GETEC_USER }}
           GETEC_PASS: ${{ secrets.GETEC_PASS }}
+          PYTHONUNBUFFERED: "1"
         run: python scripts/etl_getec_atendimentos.py
