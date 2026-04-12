@@ -213,6 +213,8 @@ def calc_r_clima(temperature, humidity):
     """Calcula risco climático (0-100).
     Temperatura >35°C → 50, >40°C → 100; Umidade <30% → 50; else 0.
     Média se ambos presentes.
+
+    Returns (score, has_data): has_data is True if at least one reading exists.
     """
     scores = []
     if temperature is not None:
@@ -228,8 +230,8 @@ def calc_r_clima(temperature, humidity):
         else:
             scores.append(0)
     if not scores:
-        return 0
-    return sum(scores) / len(scores)
+        return (0, False)
+    return (sum(scores) / len(scores), True)
 
 
 def calc_r_saude(alert_level):
@@ -241,52 +243,65 @@ def calc_r_saude(alert_level):
       3 = laranja (transmissao sustentada)           → R_saude 75
       4 = vermelho (epidemia)                        → R_saude 100
 
-    Bug historico (corrigido aqui): a versao anterior usava {0,1,2,3}
-    como chaves, o que tratava o nivel 4 (epidemia, o pior) como
-    "nao mapeado" e retornava 0 (zero risco) — exatamente o oposto do
-    esperado, escondendo dos operadores os 20 municipios em estado de
-    epidemia em todo o Parana.
+    Returns (score, has_data): has_data is True if alert_level is a valid
+    InfoDengue level (1-4). Level 0 or None means no data available.
     """
+    level = int(alert_level or 0)
     mapping = {1: 25, 2: 50, 3: 75, 4: 100}
-    return mapping.get(int(alert_level or 0), 0)
+    if level in mapping:
+        return (mapping[level], True)
+    return (0, False)
 
 
 def calc_r_ambiente(fire_count):
     """Calcula risco ambiental (0-100) baseado em focos de incêndio.
     0→0, 1-5→25, 6-20→50, >20→100
+
+    Returns (score, has_data): has_data is always True for ambiente because
+    FIRMS satellite coverage is global — zero fires IS a valid reading
+    ("no fires detected"), not missing data. Unlike weather stations or
+    river gauges, absence of FIRMS events means actual absence of fire.
     """
     if fire_count <= 0:
-        return 0
+        return (0, True)
     if fire_count <= 5:
-        return 25
+        return (25, True)
     if fire_count <= 20:
-        return 50
-    return 100
+        return (50, True)
+    return (100, True)
 
 
-def calc_r_hidro(alert_level):
+def calc_r_hidro(alert_level, has_station=False):
     """Calcula risco hidrológico (0-100) baseado no alert_level do rio.
     'normal'→0, 'attention'→33, 'alert'→66, 'emergency'→100
+
+    Returns (score, has_data): has_data is True only if the municipality
+    actually has a river gauge station. The caller must pass has_station=True
+    when a real station match was found (even if status is 'normal').
     """
     mapping = {"normal": 0, "attention": 33, "alert": 66, "emergency": 100}
-    return mapping.get(alert_level or "normal", 0)
+    score = mapping.get(alert_level or "normal", 0)
+    return (score, has_station)
 
 
 def calc_r_ar(aqi):
     """Calcula risco de qualidade do ar (0-100) baseado no AQI.
     0-50→0, 51-100→25, 101-150→50, 151-200→75, >200→100
+
+    Returns (score, has_data): has_data is True if aqi is not None
+    (i.e., the municipality has an AQICN station).
     """
     if aqi is None:
-        return 0
+        return (0, False)
     if aqi <= 50:
-        return 0
+        return (0, True)
     if aqi <= 100:
-        return 25
+        return (25, True)
     if aqi <= 150:
-        return 50
+        return (50, True)
     if aqi <= 200:
-        return 75
-    return 100
+        return (75, True)
+    return (100, True)
 
 
 def classify_risk_level(irtc):
@@ -423,51 +438,78 @@ def main():
     for ibge_code, mun_name in municipalities.items():
         # R_clima: buscar por ibge_code
         clima = climate_data.get(ibge_code, {})
-        r_clima = calc_r_clima(clima.get("temperature"), clima.get("humidity"))
+        r_clima, r_clima_has = calc_r_clima(clima.get("temperature"), clima.get("humidity"))
 
         # R_saude: buscar por ibge_code
         saude = dengue_data.get(ibge_code, {})
-        r_saude = calc_r_saude(saude.get("alert_level", 0))
+        r_saude, r_saude_has = calc_r_saude(saude.get("alert_level", 0))
 
         # R_ambiente: buscar por nome do município (text match)
         fire_count = fire_data.get(mun_name, 0)
-        # Também tentar match sem acento
         if fire_count == 0:
             for fire_mun, count in fire_data.items():
                 matched_ibge = match_name_to_ibge(fire_mun, name_lookup)
                 if matched_ibge == ibge_code:
                     fire_count = count
                     break
-        r_ambiente = calc_r_ambiente(fire_count)
+        r_ambiente, r_ambiente_has = calc_r_ambiente(fire_count)
 
-        # R_hidro: buscar por nome do município
-        river_alert = river_data.get(mun_name, "normal")
-        if river_alert == "normal":
+        # R_hidro: buscar por nome do município, tracking se existe estação
+        river_alert = river_data.get(mun_name)
+        has_station = river_alert is not None
+        if not has_station:
             for river_mun, alert in river_data.items():
                 matched_ibge = match_name_to_ibge(river_mun, name_lookup)
                 if matched_ibge == ibge_code:
                     river_alert = alert
+                    has_station = True
                     break
-        r_hidro = calc_r_hidro(river_alert)
+        r_hidro, r_hidro_has = calc_r_hidro(river_alert or "normal", has_station=has_station)
 
         # R_ar: buscar por cidade (mapeamento AQICN)
-        r_ar_val = 0
+        r_ar, r_ar_has = 0, False
         for city_id, city_ibge in CITY_TO_IBGE.items():
             if city_ibge == ibge_code:
                 aqi = air_data.get(city_id)
-                r_ar_val = calc_r_ar(aqi)
+                r_ar, r_ar_has = calc_r_ar(aqi)
                 break
-        r_ar = r_ar_val
 
-        # Calcular IRTC
-        irtc = round(
-            W_CLIMA * r_clima
-            + W_SAUDE * r_saude
-            + W_AMBIENTE * r_ambiente
-            + W_HIDRO * r_hidro
-            + W_AR * r_ar,
-            2,
-        )
+        # Coverage-normalized IRTC (Option 4: hybrid)
+        #
+        # Instead of treating missing-data domains as score=0, we exclude
+        # them from the weighted average. This means a municipality with
+        # only dengue data (R_saude=100, epidemic) gets IRTC=100 ("critico")
+        # rather than being diluted down to 25 by 4 phantom zeros.
+        #
+        # data_coverage = sum of weights of available domains (0..1).
+        # 1.0 means all 5 domains have real data for this municipality.
+        domains = [
+            (W_CLIMA, r_clima, r_clima_has, "clima"),
+            (W_SAUDE, r_saude, r_saude_has, "saude"),
+            (W_AMBIENTE, r_ambiente, r_ambiente_has, "ambiente"),
+            (W_HIDRO, r_hidro, r_hidro_has, "hidro"),
+            (W_AR, r_ar, r_ar_has, "ar"),
+        ]
+
+        available = [(w, s, name) for w, s, has, name in domains if has]
+        if available:
+            total_weight = sum(w for w, s, n in available)
+            irtc = round(sum(w * s for w, s, n in available) / total_weight, 2)
+            data_coverage = round(total_weight, 2)
+        else:
+            irtc = 0.0
+            data_coverage = 0.0
+
+        # Secondary: max domain score and which domain dominates
+        max_domain_score = 0
+        dominant_domain = None
+        for _w, score, has, name in domains:
+            if has and score > max_domain_score:
+                max_domain_score = score
+                dominant_domain = name
+        if dominant_domain is None and available:
+            dominant_domain = available[0][2]
+
         risk_level = classify_risk_level(irtc)
         risk_distribution[risk_level] += 1
 
@@ -481,6 +523,9 @@ def main():
             "risk_ar": round(r_ar, 2),
             "irtc_score": irtc,
             "risk_level": risk_level,
+            "data_coverage": data_coverage,
+            "max_domain_score": max_domain_score,
+            "dominant_domain": dominant_domain,
             "calculated_at": now,
         })
 
@@ -548,9 +593,12 @@ def main():
     top10 = sorted(irtc_records, key=lambda r: r["irtc_score"], reverse=True)[:10]
     print(f"\nTop 10 municípios por IRTC:")
     for i, rec in enumerate(top10, 1):
+        cov_pct = int(rec.get("data_coverage", 0) * 100)
+        dom = rec.get("dominant_domain", "?")
         print(
             f"  {i:>2}. {rec['municipality']:<30} "
             f"IRTC={rec['irtc_score']:>6.2f}  [{rec['risk_level']}]  "
+            f"cov={cov_pct}%  dom={dom}  "
             f"(C={rec['risk_clima']:.0f} S={rec['risk_saude']:.0f} A={rec['risk_ambiente']:.0f} "
             f"H={rec['risk_hidro']:.0f} Ar={rec['risk_ar']:.0f})"
         )
