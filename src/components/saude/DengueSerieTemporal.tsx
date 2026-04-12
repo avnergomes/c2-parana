@@ -14,7 +14,7 @@ export function DengueSerieTemporal() {
     return acc
   }, {} as Record<string, { week: string; total: number; municipios: number }>)
 
-  const chartData = Object.values(byWeek || {}).slice(-16)
+  const chartData = Object.values(byWeek || {})
 
   if (isLoading) return <div className="h-40 bg-background-elevated rounded animate-pulse" />
 
