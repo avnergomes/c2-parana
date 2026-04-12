@@ -1,0 +1,1638 @@
+[
+  {
+    "code": 10,
+    "name": "Abatiá"
+  },
+  {
+    "code": 20,
+    "name": "Adrianópolis"
+  },
+  {
+    "code": 102,
+    "name": "Agricultor Demais Categorias"
+  },
+  {
+    "code": 101,
+    "name": "Agricultor Familiar"
+  },
+  {
+    "code": 30,
+    "name": "Agudos do Sul"
+  },
+  {
+    "code": 40,
+    "name": "Almirante Tamandaré"
+  },
+  {
+    "code": 45,
+    "name": "Altamira do Paraná"
+  },
+  {
+    "code": 60,
+    "name": "Alto Paraná"
+  },
+  {
+    "code": 2862,
+    "name": "Alto Paraíso"
+  },
+  {
+    "code": 70,
+    "name": "Alto Piquiri"
+  },
+  {
+    "code": 50,
+    "name": "Altônia"
+  },
+  {
+    "code": 80,
+    "name": "Alvorada do Sul"
+  },
+  {
+    "code": 90,
+    "name": "Amaporã"
+  },
+  {
+    "code": 100,
+    "name": "Ampére"
+  },
+  {
+    "code": 105,
+    "name": "Anahy"
+  },
+  {
+    "code": 120,
+    "name": "Antonina"
+  },
+  {
+    "code": 130,
+    "name": "Antônio Olinto"
+  },
+  {
+    "code": 140,
+    "name": "Apucarana"
+  },
+  {
+    "code": 150,
+    "name": "Arapongas"
+  },
+  {
+    "code": 160,
+    "name": "Arapoti"
+  },
+  {
+    "code": 165,
+    "name": "Arapuã"
+  },
+  {
+    "code": 170,
+    "name": "Araruna"
+  },
+  {
+    "code": 180,
+    "name": "Araucária"
+  },
+  {
+    "code": 185,
+    "name": "Ariranha do Ivaí"
+  },
+  {
+    "code": 190,
+    "name": "Assaí"
+  },
+  {
+    "code": 109,
+    "name": "Assentado"
+  },
+  {
+    "code": 200,
+    "name": "Assis Chateaubriand"
+  },
+  {
+    "code": 210,
+    "name": "Astorga"
+  },
+  {
+    "code": 220,
+    "name": "Atalaia"
+  },
+  {
+    "code": 230,
+    "name": "Balsa Nova"
+  },
+  {
+    "code": 240,
+    "name": "Bandeirantes"
+  },
+  {
+    "code": 250,
+    "name": "Barbosa Ferraz"
+  },
+  {
+    "code": 270,
+    "name": "Barra do Jacaré"
+  },
+  {
+    "code": 260,
+    "name": "Barracão"
+  },
+  {
+    "code": 275,
+    "name": "Bela Vista da Caroba"
+  },
+  {
+    "code": 280,
+    "name": "Bela Vista do Paraíso"
+  },
+  {
+    "code": 290,
+    "name": "Bituruna"
+  },
+  {
+    "code": 300,
+    "name": "Boa Esperança"
+  },
+  {
+    "code": 302,
+    "name": "Boa Esperança do Iguaçu"
+  },
+  {
+    "code": 304,
+    "name": "Boa Ventura de São Roque"
+  },
+  {
+    "code": 305,
+    "name": "Boa Vista da Aparecida"
+  },
+  {
+    "code": 310,
+    "name": "Bocaiúva do Sul"
+  },
+  {
+    "code": 315,
+    "name": "Bom Jesus do Sul"
+  },
+  {
+    "code": 320,
+    "name": "Bom Sucesso"
+  },
+  {
+    "code": 322,
+    "name": "Bom Sucesso do Sul"
+  },
+  {
+    "code": 330,
+    "name": "Borrazópolis"
+  },
+  {
+    "code": 335,
+    "name": "Braganey"
+  },
+  {
+    "code": 337,
+    "name": "Brasilândia do Sul"
+  },
+  {
+    "code": 340,
+    "name": "Cafeara"
+  },
+  {
+    "code": 345,
+    "name": "Cafelândia"
+  },
+  {
+    "code": 347,
+    "name": "Cafezal do Sul"
+  },
+  {
+    "code": 350,
+    "name": "Califórnia"
+  },
+  {
+    "code": 360,
+    "name": "Cambará"
+  },
+  {
+    "code": 380,
+    "name": "Cambira"
+  },
+  {
+    "code": 370,
+    "name": "Cambé"
+  },
+  {
+    "code": 400,
+    "name": "Campina Grande do Sul"
+  },
+  {
+    "code": 390,
+    "name": "Campina da Lagoa"
+  },
+  {
+    "code": 395,
+    "name": "Campina do Simão"
+  },
+  {
+    "code": 405,
+    "name": "Campo Bonito"
+  },
+  {
+    "code": 420,
+    "name": "Campo Largo"
+  },
+  {
+    "code": 425,
+    "name": "Campo Magro"
+  },
+  {
+    "code": 430,
+    "name": "Campo Mourão"
+  },
+  {
+    "code": 442,
+    "name": "Candói"
+  },
+  {
+    "code": 445,
+    "name": "Cantagalo"
+  },
+  {
+    "code": 450,
+    "name": "Capanema"
+  },
+  {
+    "code": 460,
+    "name": "Capitão Leônidas Marques"
+  },
+  {
+    "code": 465,
+    "name": "Carambeí"
+  },
+  {
+    "code": 470,
+    "name": "Carlópolis"
+  },
+  {
+    "code": 480,
+    "name": "Cascavel"
+  },
+  {
+    "code": 490,
+    "name": "Castro"
+  },
+  {
+    "code": 500,
+    "name": "Catanduvas"
+  },
+  {
+    "code": 510,
+    "name": "Centenário do Sul"
+  },
+  {
+    "code": 520,
+    "name": "Cerro Azul"
+  },
+  {
+    "code": 540,
+    "name": "Chopinzinho"
+  },
+  {
+    "code": 550,
+    "name": "Cianorte"
+  },
+  {
+    "code": 560,
+    "name": "Cidade Gaúcha"
+  },
+  {
+    "code": 570,
+    "name": "Clevelândia"
+  },
+  {
+    "code": 580,
+    "name": "Colombo"
+  },
+  {
+    "code": 590,
+    "name": "Colorado"
+  },
+  {
+    "code": 600,
+    "name": "Congonhinhas"
+  },
+  {
+    "code": 610,
+    "name": "Conselheiro Mairinck"
+  },
+  {
+    "code": 620,
+    "name": "Contenda"
+  },
+  {
+    "code": 630,
+    "name": "Corbélia"
+  },
+  {
+    "code": 640,
+    "name": "Cornélio Procópio"
+  },
+  {
+    "code": 645,
+    "name": "Coronel Domingos Soares"
+  },
+  {
+    "code": 650,
+    "name": "Coronel Vivida"
+  },
+  {
+    "code": 655,
+    "name": "Corumbataí do Sul"
+  },
+  {
+    "code": 680,
+    "name": "Cruz Machado"
+  },
+  {
+    "code": 657,
+    "name": "Cruzeiro do Iguaçu"
+  },
+  {
+    "code": 660,
+    "name": "Cruzeiro do Oeste"
+  },
+  {
+    "code": 670,
+    "name": "Cruzeiro do Sul"
+  },
+  {
+    "code": 685,
+    "name": "Cruzmaltina"
+  },
+  {
+    "code": 700,
+    "name": "Curiúva"
+  },
+  {
+    "code": 440,
+    "name": "Cândido de Abreu"
+  },
+  {
+    "code": 530,
+    "name": "Céu Azul"
+  },
+  {
+    "code": 715,
+    "name": "Diamante D'Oeste"
+  },
+  {
+    "code": 710,
+    "name": "Diamante do Norte"
+  },
+  {
+    "code": 712,
+    "name": "Diamante do Sul"
+  },
+  {
+    "code": 720,
+    "name": "Dois Vizinhos"
+  },
+  {
+    "code": 725,
+    "name": "Douradina"
+  },
+  {
+    "code": 730,
+    "name": "Doutor Camargo"
+  },
+  {
+    "code": 2863,
+    "name": "Doutor Ulysses"
+  },
+  {
+    "code": 750,
+    "name": "Engenheiro Beltrão"
+  },
+  {
+    "code": 753,
+    "name": "Entre Rios do Oeste"
+  },
+  {
+    "code": 740,
+    "name": "Enéas Marques"
+  },
+  {
+    "code": 752,
+    "name": "Esperança Nova"
+  },
+  {
+    "code": 754,
+    "name": "Espigão Alto do Iguaçu"
+  },
+  {
+    "code": 408,
+    "name": "Estudante"
+  },
+  {
+    "code": 755,
+    "name": "Farol"
+  },
+  {
+    "code": 760,
+    "name": "Faxinal"
+  },
+  {
+    "code": 765,
+    "name": "Fazenda Rio Grande"
+  },
+  {
+    "code": 773,
+    "name": "Fernandes Pinheiro"
+  },
+  {
+    "code": 775,
+    "name": "Figueira"
+  },
+  {
+    "code": 785,
+    "name": "Flor da Serra do Sul"
+  },
+  {
+    "code": 780,
+    "name": "Floraí"
+  },
+  {
+    "code": 790,
+    "name": "Floresta"
+  },
+  {
+    "code": 800,
+    "name": "Florestópolis"
+  },
+  {
+    "code": 810,
+    "name": "Flórida"
+  },
+  {
+    "code": 820,
+    "name": "Formosa do Oeste"
+  },
+  {
+    "code": 830,
+    "name": "Foz do Iguaçu"
+  },
+  {
+    "code": 845,
+    "name": "Foz do Jordão"
+  },
+  {
+    "code": 832,
+    "name": "Francisco Alves"
+  },
+  {
+    "code": 840,
+    "name": "Francisco Beltrão"
+  },
+  {
+    "code": 770,
+    "name": "Fênix"
+  },
+  {
+    "code": 850,
+    "name": "General Carneiro"
+  },
+  {
+    "code": 855,
+    "name": "Godoy Moreira"
+  },
+  {
+    "code": 860,
+    "name": "Goioerê"
+  },
+  {
+    "code": 865,
+    "name": "Goioxim"
+  },
+  {
+    "code": 870,
+    "name": "Grandes Rios"
+  },
+  {
+    "code": 890,
+    "name": "Guairaçá"
+  },
+  {
+    "code": 895,
+    "name": "Guamiranga"
+  },
+  {
+    "code": 900,
+    "name": "Guapirama"
+  },
+  {
+    "code": 910,
+    "name": "Guaporema"
+  },
+  {
+    "code": 920,
+    "name": "Guaraci"
+  },
+  {
+    "code": 930,
+    "name": "Guaraniaçu"
+  },
+  {
+    "code": 940,
+    "name": "Guarapuava"
+  },
+  {
+    "code": 950,
+    "name": "Guaraqueçaba"
+  },
+  {
+    "code": 960,
+    "name": "Guaratuba"
+  },
+  {
+    "code": 880,
+    "name": "Guaíra"
+  },
+  {
+    "code": 965,
+    "name": "Honório Serpa"
+  },
+  {
+    "code": 970,
+    "name": "Ibaiti"
+  },
+  {
+    "code": 975,
+    "name": "Ibema"
+  },
+  {
+    "code": 980,
+    "name": "Ibiporã"
+  },
+  {
+    "code": 990,
+    "name": "Icaraíma"
+  },
+  {
+    "code": 1000,
+    "name": "Iguaraçu"
+  },
+  {
+    "code": 1005,
+    "name": "Iguatu"
+  },
+  {
+    "code": 1007,
+    "name": "Imbaú"
+  },
+  {
+    "code": 1010,
+    "name": "Imbituva"
+  },
+  {
+    "code": 1030,
+    "name": "Inajá"
+  },
+  {
+    "code": 1040,
+    "name": "Indianópolis"
+  },
+  {
+    "code": 107,
+    "name": "Indígena"
+  },
+  {
+    "code": 1020,
+    "name": "Inácio Martins"
+  },
+  {
+    "code": 1050,
+    "name": "Ipiranga"
+  },
+  {
+    "code": 1060,
+    "name": "Iporã"
+  },
+  {
+    "code": 1065,
+    "name": "Iracema do Oeste"
+  },
+  {
+    "code": 1070,
+    "name": "Irati"
+  },
+  {
+    "code": 1080,
+    "name": "Iretama"
+  },
+  {
+    "code": 1090,
+    "name": "Itaguajé"
+  },
+  {
+    "code": 1095,
+    "name": "Itaipulândia"
+  },
+  {
+    "code": 1100,
+    "name": "Itambaracá"
+  },
+  {
+    "code": 1110,
+    "name": "Itambé"
+  },
+  {
+    "code": 1120,
+    "name": "Itapejara Doeste"
+  },
+  {
+    "code": 1125,
+    "name": "Itaperuçu"
+  },
+  {
+    "code": 1130,
+    "name": "Itaúna do Sul"
+  },
+  {
+    "code": 1150,
+    "name": "Ivaiporã"
+  },
+  {
+    "code": 1160,
+    "name": "Ivatuba"
+  },
+  {
+    "code": 1155,
+    "name": "Ivaté"
+  },
+  {
+    "code": 1140,
+    "name": "Ivaí"
+  },
+  {
+    "code": 1170,
+    "name": "Jaboti"
+  },
+  {
+    "code": 1180,
+    "name": "Jacarezinho"
+  },
+  {
+    "code": 1190,
+    "name": "Jaguapitã"
+  },
+  {
+    "code": 1200,
+    "name": "Jaguariaíva"
+  },
+  {
+    "code": 1210,
+    "name": "Jandaia do Sul"
+  },
+  {
+    "code": 1220,
+    "name": "Janiópolis"
+  },
+  {
+    "code": 1230,
+    "name": "Japira"
+  },
+  {
+    "code": 1240,
+    "name": "Japurá"
+  },
+  {
+    "code": 1250,
+    "name": "Jardim Alegre"
+  },
+  {
+    "code": 1260,
+    "name": "Jardim Olinda"
+  },
+  {
+    "code": 1270,
+    "name": "Jataizinho"
+  },
+  {
+    "code": 1275,
+    "name": "Jesuítas"
+  },
+  {
+    "code": 1280,
+    "name": "Joaquim Távora"
+  },
+  {
+    "code": 1290,
+    "name": "Jundiaí do Sul"
+  },
+  {
+    "code": 1295,
+    "name": "Juranda"
+  },
+  {
+    "code": 1300,
+    "name": "Jussara"
+  },
+  {
+    "code": 1310,
+    "name": "Kaloré"
+  },
+  {
+    "code": 1320,
+    "name": "Lapa"
+  },
+  {
+    "code": 1325,
+    "name": "Laranjal"
+  },
+  {
+    "code": 1330,
+    "name": "Laranjeiras do Sul"
+  },
+  {
+    "code": 1340,
+    "name": "Leópolis"
+  },
+  {
+    "code": 1342,
+    "name": "Lidianópolis"
+  },
+  {
+    "code": 1345,
+    "name": "Lindoeste"
+  },
+  {
+    "code": 1350,
+    "name": "Loanda"
+  },
+  {
+    "code": 1360,
+    "name": "Lobato"
+  },
+  {
+    "code": 1370,
+    "name": "Londrina"
+  },
+  {
+    "code": 1373,
+    "name": "Luiziana"
+  },
+  {
+    "code": 1375,
+    "name": "Lunardelli"
+  },
+  {
+    "code": 1380,
+    "name": "Lupionópolis"
+  },
+  {
+    "code": 1390,
+    "name": "Mallet"
+  },
+  {
+    "code": 1400,
+    "name": "Mamborê"
+  },
+  {
+    "code": 1420,
+    "name": "Mandaguari"
+  },
+  {
+    "code": 1410,
+    "name": "Mandaguaçu"
+  },
+  {
+    "code": 1430,
+    "name": "Mandirituba"
+  },
+  {
+    "code": 1435,
+    "name": "Manfrinópolis"
+  },
+  {
+    "code": 1440,
+    "name": "Mangueirinha"
+  },
+  {
+    "code": 1450,
+    "name": "Manoel Ribas"
+  },
+  {
+    "code": 1460,
+    "name": "Marechal Cândido Rondon"
+  },
+  {
+    "code": 1470,
+    "name": "Maria Helena"
+  },
+  {
+    "code": 1480,
+    "name": "Marialva"
+  },
+  {
+    "code": 1500,
+    "name": "Marilena"
+  },
+  {
+    "code": 1510,
+    "name": "Mariluz"
+  },
+  {
+    "code": 1490,
+    "name": "Marilândia do Sul"
+  },
+  {
+    "code": 1520,
+    "name": "Maringá"
+  },
+  {
+    "code": 1535,
+    "name": "Maripá"
+  },
+  {
+    "code": 1530,
+    "name": "Mariópolis"
+  },
+  {
+    "code": 1540,
+    "name": "Marmeleiro"
+  },
+  {
+    "code": 1545,
+    "name": "Marquinho"
+  },
+  {
+    "code": 1550,
+    "name": "Marumbi"
+  },
+  {
+    "code": 1560,
+    "name": "Matelândia"
+  },
+  {
+    "code": 1570,
+    "name": "Matinhos"
+  },
+  {
+    "code": 1573,
+    "name": "Mato Rico"
+  },
+  {
+    "code": 1575,
+    "name": "Mauá da Serra"
+  },
+  {
+    "code": 1580,
+    "name": "Medianeira"
+  },
+  {
+    "code": 1585,
+    "name": "Mercedes"
+  },
+  {
+    "code": 1590,
+    "name": "Mirador"
+  },
+  {
+    "code": 1600,
+    "name": "Miraselva"
+  },
+  {
+    "code": 1605,
+    "name": "Missal"
+  },
+  {
+    "code": 1610,
+    "name": "Moreira Sales"
+  },
+  {
+    "code": 1620,
+    "name": "Morretes"
+  },
+  {
+    "code": 1630,
+    "name": "Munhoz de Melo"
+  },
+  {
+    "code": 1640,
+    "name": "Nossa Senhora das Graças"
+  },
+  {
+    "code": 1650,
+    "name": "Nova Aliança do Ivaí"
+  },
+  {
+    "code": 1660,
+    "name": "Nova América da Colina"
+  },
+  {
+    "code": 1670,
+    "name": "Nova Aurora"
+  },
+  {
+    "code": 1680,
+    "name": "Nova Cantu"
+  },
+  {
+    "code": 1690,
+    "name": "Nova Esperança"
+  },
+  {
+    "code": 1695,
+    "name": "Nova Esperança do Sudoeste"
+  },
+  {
+    "code": 1700,
+    "name": "Nova Fátima"
+  },
+  {
+    "code": 1705,
+    "name": "Nova Laranjeiras"
+  },
+  {
+    "code": 1710,
+    "name": "Nova Londrina"
+  },
+  {
+    "code": 1720,
+    "name": "Nova Olímpia"
+  },
+  {
+    "code": 1725,
+    "name": "Nova Prata do Iguaçu"
+  },
+  {
+    "code": 1721,
+    "name": "Nova Santa Bárbara"
+  },
+  {
+    "code": 1722,
+    "name": "Nova Santa Rosa"
+  },
+  {
+    "code": 1727,
+    "name": "Nova Tebas"
+  },
+  {
+    "code": 1729,
+    "name": "Novo Itacolomi"
+  },
+  {
+    "code": 1730,
+    "name": "Ortigueira"
+  },
+  {
+    "code": 1740,
+    "name": "Ourizona"
+  },
+  {
+    "code": 1745,
+    "name": "Ouro Verde do Oeste"
+  },
+  {
+    "code": 110,
+    "name": "Outros Públicos"
+  },
+  {
+    "code": 1750,
+    "name": "Paiçandu"
+  },
+  {
+    "code": 1760,
+    "name": "Palmas"
+  },
+  {
+    "code": 1770,
+    "name": "Palmeira"
+  },
+  {
+    "code": 1780,
+    "name": "Palmital"
+  },
+  {
+    "code": 1790,
+    "name": "Palotina"
+  },
+  {
+    "code": 1810,
+    "name": "Paranacity"
+  },
+  {
+    "code": 1820,
+    "name": "Paranaguá"
+  },
+  {
+    "code": 1830,
+    "name": "Paranapoema"
+  },
+  {
+    "code": 1840,
+    "name": "Paranavaí"
+  },
+  {
+    "code": 1800,
+    "name": "Paraíso do Norte"
+  },
+  {
+    "code": 1845,
+    "name": "Pato Bragado"
+  },
+  {
+    "code": 1850,
+    "name": "Pato Branco"
+  },
+  {
+    "code": 1860,
+    "name": "Paula Freitas"
+  },
+  {
+    "code": 1870,
+    "name": "Paulo Frontin"
+  },
+  {
+    "code": 1880,
+    "name": "Peabiru"
+  },
+  {
+    "code": 1885,
+    "name": "Perobal"
+  },
+  {
+    "code": 104,
+    "name": "Pescador Artesanal"
+  },
+  {
+    "code": 1915,
+    "name": "Pinhais"
+  },
+  {
+    "code": 1925,
+    "name": "Pinhal de São Bento"
+  },
+  {
+    "code": 1920,
+    "name": "Pinhalão"
+  },
+  {
+    "code": 1930,
+    "name": "Pinhão"
+  },
+  {
+    "code": 1950,
+    "name": "Piraquara"
+  },
+  {
+    "code": 1940,
+    "name": "Piraí do Sul"
+  },
+  {
+    "code": 1960,
+    "name": "Pitanga"
+  },
+  {
+    "code": 1965,
+    "name": "Pitangueiras"
+  },
+  {
+    "code": 1910,
+    "name": "Piên"
+  },
+  {
+    "code": 1970,
+    "name": "Planaltina do Paraná"
+  },
+  {
+    "code": 1980,
+    "name": "Planalto"
+  },
+  {
+    "code": 1990,
+    "name": "Ponta Grossa"
+  },
+  {
+    "code": 1995,
+    "name": "Pontal do Paraná"
+  },
+  {
+    "code": 2000,
+    "name": "Porecatu"
+  },
+  {
+    "code": 2010,
+    "name": "Porto Amazonas"
+  },
+  {
+    "code": 2015,
+    "name": "Porto Barreiro"
+  },
+  {
+    "code": 2020,
+    "name": "Porto Rico"
+  },
+  {
+    "code": 2030,
+    "name": "Porto Vitória"
+  },
+  {
+    "code": 2033,
+    "name": "Prado Ferreira"
+  },
+  {
+    "code": 2035,
+    "name": "Pranchita"
+  },
+  {
+    "code": 2040,
+    "name": "Presidente Castelo Branco"
+  },
+  {
+    "code": 2050,
+    "name": "Primeiro de Maio"
+  },
+  {
+    "code": 111,
+    "name": "Profissional de Ater"
+  },
+  {
+    "code": 411,
+    "name": "Profissional de Cooperativa"
+  },
+  {
+    "code": 410,
+    "name": "Profissional de Ensino"
+  },
+  {
+    "code": 409,
+    "name": "Profissional de Pesquisa"
+  },
+  {
+    "code": 2060,
+    "name": "Prudentópolis"
+  },
+  {
+    "code": 1890,
+    "name": "Pérola"
+  },
+  {
+    "code": 1900,
+    "name": "Pérola D'Oeste"
+  },
+  {
+    "code": 2065,
+    "name": "Quarto Centenário"
+  },
+  {
+    "code": 2070,
+    "name": "Quatiguá"
+  },
+  {
+    "code": 2080,
+    "name": "Quatro Barras"
+  },
+  {
+    "code": 2085,
+    "name": "Quatro Pontes"
+  },
+  {
+    "code": 2090,
+    "name": "Quedas do Iguaçu"
+  },
+  {
+    "code": 2100,
+    "name": "Querência do Norte"
+  },
+  {
+    "code": 108,
+    "name": "Quilombola"
+  },
+  {
+    "code": 2110,
+    "name": "Quinta do Sol"
+  },
+  {
+    "code": 2120,
+    "name": "Quitandinha"
+  },
+  {
+    "code": 2125,
+    "name": "Ramilândia"
+  },
+  {
+    "code": 2130,
+    "name": "Rancho Alegre"
+  },
+  {
+    "code": 2135,
+    "name": "Rancho Alegre Doeste"
+  },
+  {
+    "code": 2140,
+    "name": "Realeza"
+  },
+  {
+    "code": 2150,
+    "name": "Rebouças"
+  },
+  {
+    "code": 2160,
+    "name": "Renascença"
+  },
+  {
+    "code": 2170,
+    "name": "Reserva"
+  },
+  {
+    "code": 2175,
+    "name": "Reserva do Iguaçu"
+  },
+  {
+    "code": 2180,
+    "name": "Ribeirão Claro"
+  },
+  {
+    "code": 2190,
+    "name": "Ribeirão do Pinhal"
+  },
+  {
+    "code": 2200,
+    "name": "Rio Azul"
+  },
+  {
+    "code": 2210,
+    "name": "Rio Bom"
+  },
+  {
+    "code": 2215,
+    "name": "Rio Bonito do Iguaçu"
+  },
+  {
+    "code": 2217,
+    "name": "Rio Branco do Ivaí"
+  },
+  {
+    "code": 2220,
+    "name": "Rio Branco do Sul"
+  },
+  {
+    "code": 2230,
+    "name": "Rio Negro"
+  },
+  {
+    "code": 2240,
+    "name": "Rolândia"
+  },
+  {
+    "code": 2250,
+    "name": "Roncador"
+  },
+  {
+    "code": 2260,
+    "name": "Rondon"
+  },
+  {
+    "code": 2265,
+    "name": "Rosário do Ivaí"
+  },
+  {
+    "code": 2270,
+    "name": "Sabáudia"
+  },
+  {
+    "code": 2280,
+    "name": "Salgado Filho"
+  },
+  {
+    "code": 2290,
+    "name": "Salto do Itararé"
+  },
+  {
+    "code": 2300,
+    "name": "Salto do Lontra"
+  },
+  {
+    "code": 2310,
+    "name": "Santa Amélia"
+  },
+  {
+    "code": 2320,
+    "name": "Santa Cecília do Pavão"
+  },
+  {
+    "code": 2330,
+    "name": "Santa Cruz de Monte Castelo"
+  },
+  {
+    "code": 2340,
+    "name": "Santa Fé"
+  },
+  {
+    "code": 2350,
+    "name": "Santa Helena"
+  },
+  {
+    "code": 2360,
+    "name": "Santa Inês"
+  },
+  {
+    "code": 2370,
+    "name": "Santa Isabel do Ivaí"
+  },
+  {
+    "code": 2380,
+    "name": "Santa Izabel do Oeste"
+  },
+  {
+    "code": 2382,
+    "name": "Santa Lúcia"
+  },
+  {
+    "code": 2385,
+    "name": "Santa Maria do Oeste"
+  },
+  {
+    "code": 2390,
+    "name": "Santa Mariana"
+  },
+  {
+    "code": 2395,
+    "name": "Santa Mônica"
+  },
+  {
+    "code": 2402,
+    "name": "Santa Tereza do Oeste"
+  },
+  {
+    "code": 2405,
+    "name": "Santa Terezinha de Itaipu"
+  },
+  {
+    "code": 2400,
+    "name": "Santana do Itararé"
+  },
+  {
+    "code": 2410,
+    "name": "Santo Antônio da Platina"
+  },
+  {
+    "code": 2420,
+    "name": "Santo Antônio do Caiuá"
+  },
+  {
+    "code": 2430,
+    "name": "Santo Antônio do Paraíso"
+  },
+  {
+    "code": 2440,
+    "name": "Santo Antônio do Sudoeste"
+  },
+  {
+    "code": 2450,
+    "name": "Santo Inácio"
+  },
+  {
+    "code": 2620,
+    "name": "Sapopema"
+  },
+  {
+    "code": 2625,
+    "name": "Sarandi"
+  },
+  {
+    "code": 2627,
+    "name": "Saudade do Iguaçu"
+  },
+  {
+    "code": 2630,
+    "name": "Sengés"
+  },
+  {
+    "code": 2635,
+    "name": "Serranópolis do Iguaçu"
+  },
+  {
+    "code": 2640,
+    "name": "Sertaneja"
+  },
+  {
+    "code": 2650,
+    "name": "Sertanópolis"
+  },
+  {
+    "code": 2660,
+    "name": "Siqueira Campos"
+  },
+  {
+    "code": 2665,
+    "name": "Sulina"
+  },
+  {
+    "code": 2460,
+    "name": "São Carlos do Ivaí"
+  },
+  {
+    "code": 2470,
+    "name": "São Jerônimo da Serra"
+  },
+  {
+    "code": 2520,
+    "name": "São Jorge D'Oeste"
+  },
+  {
+    "code": 2530,
+    "name": "São Jorge do Ivaí"
+  },
+  {
+    "code": 2535,
+    "name": "São Jorge do Patrocínio"
+  },
+  {
+    "code": 2540,
+    "name": "São José da Boa Vista"
+  },
+  {
+    "code": 2545,
+    "name": "São José das Palmeiras"
+  },
+  {
+    "code": 2550,
+    "name": "São José dos Pinhais"
+  },
+  {
+    "code": 2480,
+    "name": "São João"
+  },
+  {
+    "code": 2490,
+    "name": "São João do Caiuá"
+  },
+  {
+    "code": 2500,
+    "name": "São João do Ivaí"
+  },
+  {
+    "code": 2510,
+    "name": "São João do Triunfo"
+  },
+  {
+    "code": 2555,
+    "name": "São Manoel do Paraná"
+  },
+  {
+    "code": 2560,
+    "name": "São Mateus do Sul"
+  },
+  {
+    "code": 2570,
+    "name": "São Miguel do Iguaçu"
+  },
+  {
+    "code": 2575,
+    "name": "São Pedro do Iguaçu"
+  },
+  {
+    "code": 2580,
+    "name": "São Pedro do Ivaí"
+  },
+  {
+    "code": 2590,
+    "name": "São Pedro do Paraná"
+  },
+  {
+    "code": 2600,
+    "name": "São Sebastião da Amoreira"
+  },
+  {
+    "code": 2610,
+    "name": "São Tomé"
+  },
+  {
+    "code": 2667,
+    "name": "Tamarana"
+  },
+  {
+    "code": 2670,
+    "name": "Tamboara"
+  },
+  {
+    "code": 2680,
+    "name": "Tapejara"
+  },
+  {
+    "code": 2690,
+    "name": "Tapira"
+  },
+  {
+    "code": 2700,
+    "name": "Teixeira Soares"
+  },
+  {
+    "code": 2710,
+    "name": "Telêmaco Borba"
+  },
+  {
+    "code": 2720,
+    "name": "Terra Boa"
+  },
+  {
+    "code": 2730,
+    "name": "Terra Rica"
+  },
+  {
+    "code": 2740,
+    "name": "Terra Roxa"
+  },
+  {
+    "code": 2750,
+    "name": "Tibagi"
+  },
+  {
+    "code": 2760,
+    "name": "Tijucas do Sul"
+  },
+  {
+    "code": 2770,
+    "name": "Toledo"
+  },
+  {
+    "code": 2780,
+    "name": "Tomazina"
+  },
+  {
+    "code": 103,
+    "name": "Trabalhador Rural"
+  },
+  {
+    "code": 2785,
+    "name": "Três Barras do Paraná"
+  },
+  {
+    "code": 2788,
+    "name": "Tunas do Paraná"
+  },
+  {
+    "code": 2790,
+    "name": "Tuneiras do Oeste"
+  },
+  {
+    "code": 2795,
+    "name": "Tupãssi"
+  },
+  {
+    "code": 2796,
+    "name": "Turvo"
+  },
+  {
+    "code": 2800,
+    "name": "Ubiratã"
+  },
+  {
+    "code": 2810,
+    "name": "Umuarama"
+  },
+  {
+    "code": 2830,
+    "name": "Uniflor"
+  },
+  {
+    "code": 2820,
+    "name": "União da Vitória"
+  },
+  {
+    "code": 2840,
+    "name": "Uraí"
+  },
+  {
+    "code": 2853,
+    "name": "Ventania"
+  },
+  {
+    "code": 2855,
+    "name": "Vera Cruz do Oeste"
+  },
+  {
+    "code": 2860,
+    "name": "Verê"
+  },
+  {
+    "code": 2865,
+    "name": "Virmond"
+  },
+  {
+    "code": 2870,
+    "name": "Vitorino"
+  },
+  {
+    "code": 2850,
+    "name": "Wenceslau Braz"
+  },
+  {
+    "code": 2880,
+    "name": "Xambrê"
+  },
+  {
+    "code": 115,
+    "name": "Ângulo"
+  }
+]
