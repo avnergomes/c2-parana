@@ -2,7 +2,7 @@
 
 **Versão:** 1.2
 **Data:** 2026-04-12 (atualizado após sessões de 11-12/abr)
-**Status:** ✅ **3.A + 3.B + 3.H shipadas** | IRTC recalibrado (Opção 4) | InfoHidro 10/12 seções
+**Status:** ✅ **3.A + 3.B + 3.G + 3.H shipadas** | IRTC recalibrado (Opção 4) | 5/8 sub-fases concluidas
 **Predecessor:** `PLANO_IMPLEMENTACAO_C4ISR.md` seção "FASE 3 — Fusão de Dados e Inteligência"
 
 ---
@@ -276,20 +276,25 @@ z-score rolling window (sem ML).
 
 ---
 
-### Fase 3.G — Painel de tendências no frontend (tarefa 3.8)
+### Fase 3.G — Painel de tendências no frontend (tarefa 3.8) ✅ Concluída (2026-04-12)
 
-**Objetivo:** Visão gráfica consolidada das tendências de 72h para cada domínio,
-no formato dashboard tipo "situation room".
+**Shipada em produção.** Rota `/tendencias` com 4 paineis Recharts.
 
-**Escopo:**
-- Nova rota `/tendencias` com gráficos Recharts mostrando:
-  - Evolução da temperatura média estadual últimas 72h
-  - Evolução de focos de incêndio últimas 7d (barras diárias)
-  - Delta de casos de dengue semana a semana
-  - Distribuição atual de IRTC por faixa (gauge)
-- Dados via hooks reutilizando `useClima`, `useAmbiente`, etc.
+**Implementado:**
+- Hook `useTendencias.ts` com 4 queries (temp 72h, focos 7d, dengue 8 SE, IRTC dist.)
+- Pagina `TendenciasPage.tsx` com grid 2x2 de graficos
+- Sidebar nav item "Tendencias" com icone de trend
+- Lazy-loaded via router, 6KB brotli
 
-**Dependência:** pode usar dados existentes sem esperar ML.
+**Escopo original:**
+- Nova rota `/tendencias` com graficos Recharts mostrando:
+  - Evolucao da temperatura media estadual ultimas 72h (LineChart)
+  - Evolucao de focos de incendio ultimas 7d (BarChart diario)
+  - Delta de casos de dengue semana a semana (BarChart SE)
+  - Distribuicao atual de IRTC por faixa (PieChart donut)
+- Dados via hooks dedicados `useTendencias.ts`, sem dependencias novas
+
+**Dependencia:** nenhuma (usa dados existentes nas tabelas climate_data, fire_spots, dengue_data, irtc_scores).
 
 ---
 
@@ -377,7 +382,7 @@ TBD — precisa testar do runner).
 2. ~~**3.D** — Fix de precipitação~~ ✅ resolvida (gap era falso)
 3. ~~**3.B** — Relatório situacional diário~~ ✅ shipada 2026-04-12
 4. ~~**3.H** — Rewrite InfoHidro (16 novos endpoints, dados de conservação/qualidade/vazão)~~ ✅ shipada 2026-04-12
-5. **3.G** — Painel de tendências (UX)
+5. ~~**3.G** — Painel de tendências (UX)~~ ✅ shipada 2026-04-12
 6. **3.F** — Anomalias estatísticas (baseline antes de ML)
 7. **3.C** — Projeção linear dengue (preditivo simples)
 8. **3.E** — ML real (quando tiver histórico)
