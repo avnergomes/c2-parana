@@ -2,7 +2,7 @@
 
 **Versão:** 1.2
 **Data:** 2026-04-12 (atualizado após sessões de 11-12/abr)
-**Status:** ✅ **3.A + 3.B + 3.G + 3.H shipadas** | IRTC recalibrado (Opção 4) | 5/8 sub-fases concluidas
+**Status:** ✅ **Fase 3 completa (7/8 sub-fases)** | 3.E bloqueada (historico insuficiente)
 **Predecessor:** `PLANO_IMPLEMENTACAO_C4ISR.md` seção "FASE 3 — Fusão de Dados e Inteligência"
 
 ---
@@ -210,21 +210,19 @@ todos os indicadores, tendências de 72h e predições heurísticas.
 
 ---
 
-### Fase 3.C — Preditivo simples: Extrapolação de tendência de dengue
+### Fase 3.C — Preditivo simples: Extrapolação de tendência de dengue ✅ Concluída (2026-04-12)
 
-**Objetivo:** Primeiro modelo preditivo, mas ainda sem ML — apenas **projeção
-linear** dos últimos 4 valores semanais, grosseira mas útil.
+**Shipada em produção.** Script `etl_dengue_projections.py` + cron diario + migration 019.
 
-**Escopo:**
-- Script que lê 8 semanas de `dengue_data` por município e projeta semana+4
-  usando regressão linear simples (Python stdlib, sem scikit-learn).
-- Armazena em `dengue_projections (ibge_code, projected_week, projected_cases,
-  r_squared, calculated_at)`.
-- Marca municípios com tendência de alta como candidatos a alerta preventivo.
+**Implementado:**
+- Tabela `dengue_projections` (migration 019) com projected_cases, trend, slope, R2
+- Regressao linear simples (Python stdlib, sem scikit-learn)
+- 8 semanas de baseline, projeta +4 semanas por municipio
+- Trend classification: "alta" (slope > 1, R2 > 0.3), "queda", "estavel"
+- Paginacao para buscar todos os 3192 registros de dengue_data
 
-**Nota:** O plano original fala em Prophet/ARIMA, mas começar com regressão
-linear é mais rápido, testável, e dá baseline pra comparar quando migrar pra
-ML real na Fase 3.E.
+**Primeiro run:** 399 municipios, 1596 projecoes, 7 em tendencia de alta.
+Top: Santo Inacio (slope=6.3 casos/sem, R2=0.65), Senges (R2=0.8).
 
 ---
 
@@ -259,20 +257,20 @@ ainda não temos, essa sub-fase depende de um script de backfill primeiro.
 
 ---
 
-### Fase 3.F — Detecção de anomalias estatísticas (tarefa 3.6)
+### Fase 3.F — Detecção de anomalias estatísticas (tarefa 3.6) ✅ Concluída (2026-04-12)
 
-**Objetivo:** Flag automático de valores anômalos em séries temporais usando
-z-score rolling window (sem ML).
+**Shipada em produção.** Script `etl_anomalies.py` + cron a cada 6h + migration 018.
 
-**Escopo:**
-- Script que, para cada indicador numérico (`temperature`, `humidity`, `aqi`),
-  mantém uma janela rolante de 30 observações por município e calcula z-score
-  da observação mais recente.
-- `|z| > 3` dispara uma notification de anomalia.
-- Simples mas pega casos que threshold fixo não pega (ex: temperatura "normal"
-  pra Curitiba em março é anomalia em junho).
+**Implementado:**
+- Tabela `anomalies` (migration 018) com z-score, window stats, station
+- Z-score rolling window (30 obs) para temperature, humidity, aqi
+- |z| > 3 gera registro em `anomalies` + notification para operadores
+- Severity: "high" se |z| >= 4, "medium" se >= 3
+- Circuit breaker em timeouts de rede
 
-**Dependência:** nenhuma — independente.
+**Nota:** Com apenas ~2 dias de climate_data, o detector ainda nao encontra
+anomalias (precisa de 30+ observacoes por estacao). A medida que o historico
+acumula, o detector passa a funcionar automaticamente.
 
 ---
 
@@ -383,9 +381,9 @@ TBD — precisa testar do runner).
 3. ~~**3.B** — Relatório situacional diário~~ ✅ shipada 2026-04-12
 4. ~~**3.H** — Rewrite InfoHidro (16 novos endpoints, dados de conservação/qualidade/vazão)~~ ✅ shipada 2026-04-12
 5. ~~**3.G** — Painel de tendências (UX)~~ ✅ shipada 2026-04-12
-6. **3.F** — Anomalias estatísticas (baseline antes de ML)
-7. **3.C** — Projeção linear dengue (preditivo simples)
-8. **3.E** — ML real (quando tiver histórico)
+6. ~~**3.F** — Anomalias estatísticas (baseline antes de ML)~~ ✅ shipada 2026-04-12
+7. ~~**3.C** — Projeção linear dengue (preditivo simples)~~ ✅ shipada 2026-04-12
+8. **3.E** — ML real (bloqueado: historico < 12 meses; clima 2d, focos 25d, dengue 15m, ar 1d, rios 2d)
 
 ---
 
