@@ -1,8 +1,8 @@
 # Plano de Implementação — Fase 3 (Intelligence)
 
-**Versão:** 1.1
-**Data:** 2026-04-08 (atualizado após sessão de execução)
-**Status:** ✅ **3.A shipada e validada em produção** — fases B-G pendentes
+**Versão:** 1.2
+**Data:** 2026-04-12 (atualizado após sessões de 11-12/abr)
+**Status:** ✅ **3.A + 3.B shipadas** | IRTC recalibrado (Opção 4) | 6 bugs ETL corrigidos
 **Predecessor:** `PLANO_IMPLEMENTACAO_C4ISR.md` seção "FASE 3 — Fusão de Dados e Inteligência"
 
 ---
@@ -131,7 +131,7 @@ não geravam erro visível em GitHub Actions / dashboard:
 Dividida priorizando **entrega de valor incremental**. Cada sub-fase é shippable
 sozinha e não depende das seguintes.
 
-### Fase 3.A — Correlações heurísticas simples ✅ Concluída
+### Fase 3.A — Correlações heurísticas simples ✅ Concluída (2026-04-07)
 
 **Objetivo:** Primeiro motor de fusão multi-domínio via regras booleanas
 compostas. Sem ML. Sem histórico complexo. Entrega rápida.
@@ -173,7 +173,23 @@ normais de outono; picos em dias de seca. Validar com operador humano.
 
 ---
 
-### Fase 3.B — Relatório Situacional Diário (tarefa 3.7 do plano original)
+### Fase 3.B — Relatório Situacional Diário ✅ Concluída (2026-04-12)
+
+**Shipada em produção.** Commits `fbf15b6`..`8314316` (8 commits).
+
+**Implementado:**
+- Tabela `situational_reports` (migration 017) com UNIQUE(report_date)
+- Script `etl_situational_report.py` — consolida 6 domínios (dengue, clima,
+  incêndios, rios, ar, IRTC) em resumo executivo narrativo + top risks +
+  domain summaries + recomendações acionáveis
+- Cron `cron-situational.yml` diário às 06:00 BRT (09:00 UTC)
+- Frontend: página `/relatorios` com cards expansíveis, hook `useRelatorios`
+- Primeiro relatório gerado: 12/04/2026, 4 municípios em risco alto, 990
+  casos dengue SE 13/2026, top risco: Pinhais
+
+**Escopo original (mantido como referência):**
+
+#### Fase 3.B — Relatório Situacional Diário (tarefa 3.7 do plano original)
 
 **Objetivo:** Geração automática de um relatório narrativo diário consolidando
 todos os indicadores, tendências de 72h e predições heurísticas.
@@ -277,17 +293,72 @@ no formato dashboard tipo "situation room".
 
 ---
 
-## 5. Ordem de execução recomendada
+### Fase 3.H — Rewrite ETL InfoHidro (expandir cobertura para 7 seções)
 
-Pragmática, priorizando alavancagem de valor:
+**Objetivo:** O ETL atual (`etl_infohidro.py`) cobre apenas 2 das 7 seções do
+InfoHidro (Reservatórios + Monitoramento). Uma exploração do sistema em
+2026-04-12 mapeou 16 endpoints REST adicionais que podem alimentar o C2 com
+dados de conservação ambiental, indicadores de qualidade, efluentes, telemetria
+expandida e previsão de vazão.
 
-1. **3.A** — Correlações heurísticas (agora)
-2. **3.D** — Fix de precipitação (desbloqueia regras hídricas na 3.A)
-3. **3.B** — Relatório situacional diário (entrega visível pro operador)
-4. **3.G** — Painel de tendências (UX)
-5. **3.F** — Anomalias estatísticas (baseline antes de ML)
-6. **3.C** — Projeção linear dengue (preditivo simples)
-7. **3.E** — ML real (quando tiver histórico)
+**APIs descobertas por seção:**
+
+**Conservação (8 endpoints):**
+- `GET /rest-envresources/v1/landuse_classes` — classes de uso do solo
+- `GET /rest-envresources/v1/landuse?name=SIA-XXX` — uso do solo por localidade
+- `GET /rest-envresources/v1/landuse_evolution?name=SIA-XXX` — evolução temporal
+- `GET /rest-envresources/v1/landuse_overview?name=SIA-XXX` — visão geral
+- `GET /rest-forecasts/api/hotspots?location_id=XXX` — focos de incêndio (complementar ao FIRMS)
+- `POST /forecasts-infohidro-api/desmatamentos_anual` — desmatamento anual
+- `POST /forecasts-infohidro-api/sanepar_locations` — localizações Sanepar (291 mananciais)
+- `GET /riak/infohidro/fmac.json` — FMAC monitoramento ambiental
+
+**Indicadores de qualidade da água (3 endpoints):**
+- `POST /forecasts-infohidro-api/cargas_usodosolo` — cargas poluentes por uso do solo
+- `GET /forecasts-infohidro-api/estimativas_cargas_dbo_all` — estimativas DBO
+- `POST /rest-geobar/infohidro/outorgasefluentestotal` — outorgas e efluentes totais
+
+**Efluentes / previsão de vazão (2 endpoints):**
+- `GET /forecast/v1/forecastdata/flow?summaryType=daily&source_id=2&location_id=XXX&runtime=...` — previsão de vazão
+- `POST /forecasts-infohidro-api/historical/prevhidrodaily` — histórico de previsões hidro
+
+**Telemetria expandida (4 endpoints, além do `/telemetry/v1/station` já usado):**
+- `GET /telemetry/v1/sensor` — tipos de sensores disponíveis
+- `GET /telemetry/v1/sensorstation` — mapeamento sensor-estação
+- `GET /telemetry/v1/quality` — qualidade dos dados por estação
+- `GET /telemetry/v1/operationsensorstation?summary_operation=horario` — dados horários consolidados
+
+**Águas Subterrâneas:** dados carregados via Vuex client-side (sem REST API
+separado). Requer scrape de HTML/JS da página `/Underground-Waters` se desejado.
+
+**Credenciais:** `INFOHIDRO_USER` / `INFOHIDRO_PASS` (já configurados nos
+secrets do GitHub Actions). Login via POST `/Account/Login` com ASP.NET
+anti-forgery token. Mesma sessão requer IP brasileiro (GETEC-style blocking
+TBD — precisa testar do runner).
+
+**Priorização sugerida (dentro da 3.H):**
+1. Reservatórios SAIC via API real (substituir fallback hardcoded)
+2. Hotspots SIMEPAR (complementar ao FIRMS da NASA)
+3. Desmatamento anual (dados ambientais de longo prazo)
+4. Previsão de vazão (direta para o domínio hidro do IRTC)
+5. Qualidade da água / DBO / outorgas (indicadores ambientais)
+6. Telemetria expandida (enriquecer estações existentes)
+
+**Estimativa:** ~4-6h de implementação (dividível em 2-3 sessões).
+**Dependência:** nenhuma — aditivo puro sobre o ETL existente.
+
+---
+
+## 5. Ordem de execução recomendada (atualizada 2026-04-12)
+
+1. ~~**3.A** — Correlações heurísticas~~ ✅ shipada 2026-04-07
+2. ~~**3.D** — Fix de precipitação~~ ✅ resolvida (gap era falso)
+3. ~~**3.B** — Relatório situacional diário~~ ✅ shipada 2026-04-12
+4. **3.H** — Rewrite InfoHidro (16 novos endpoints, dados de conservação/qualidade/vazão)
+5. **3.G** — Painel de tendências (UX)
+6. **3.F** — Anomalias estatísticas (baseline antes de ML)
+7. **3.C** — Projeção linear dengue (preditivo simples)
+8. **3.E** — ML real (quando tiver histórico)
 
 ---
 
@@ -321,50 +392,32 @@ em estado de **epidemia (nível 4)** caíam no `default=0` e recebiam risco zero
 o oposto do correto. Corrigido para `mapping = {1:25, 2:50, 3:75, 4:100}`. Os
 munis epidêmicos agora aparecem corretamente no Top 10 do ETL IRTC.
 
-### 🔴 Aberto — `dengue_data` está obsoleta (~1 ano stale)
-O `etl_saude.py` parou de atualizar em algum momento. A semana epidemiológica
-mais recente em produção é `2025/4` (verificado em 2026-04-08). Ou seja, o
-sistema está calculando IRTC e disparando regras de saúde com dados de **mais
-de um ano atrás**. Bug de ETL silencioso pra investigar separadamente.
+### ✅ Resolvido (2026-04-11) — `dengue_data` estava obsoleta (~1 ano stale)
+**Root cause:** `threading.Lock` non-reentrant em `AdaptiveRateLimiter` causava
+self-deadlock na primeira chamada de cada worker. Todo run do cron-saude travava
+e era morto pelo timeout de 30min desde ~2025. Bugs encadeados adicionais:
+- `records[-4:]` pegava as 4 semanas MAIS ANTIGAS (API InfoDengue retorna DESC)
+- IBGE API timeout do runner → fallback silencioso para 50 munis em vez de 399
+- `data_cache` schema drift (`cache_value`/`updated_at` inexistentes)
 
-**Verificação:**
-```sql
-SELECT MAX(year) || '/' || MAX(epidemiological_week) FROM dengue_data;
--- Esperado: 2026/<semana atual>; Observado: 2025/4
-```
+**Corrigido em 7 commits** (`56227a9`..`16f1580`). ETL agora roda full_run=true
+em 64s, 399 munis, 1596 registros, 0% erro. dengue_data atualizado para SE 13/2026.
+O mesmo schema drift foi corrigido em etl_agua, etl_clima e etl_ambiente.
 
-**Possíveis causas a investigar:**
-- Cron `cron-saude.yml` pausado/falhando silenciosamente nos GitHub Actions
-- API InfoDengue mudou de formato/endpoint
-- Bug no parser do ETL
+### ✅ Resolvido (2026-04-12) — IRTC calibração: Opção 4 (hybrid coverage-normalized)
+**Root cause:** fórmula tratava dados ausentes como score=0, diluindo o IRTC
+de ~395/399 municípios (que só têm dengue como input) para teto de 25 ("baixo").
 
-### 🔴 Aberto — IRTC calibração: cap em 25 quando só dengue contribui
-A fórmula `IRTC = 0.25*R_clima + 0.25*R_saude + 0.20*R_ambiente + 0.15*R_hidro + 0.15*R_ar`
-tem um cap matemático: o R_saude máximo (100) sozinho contribui apenas
-`0.25 * 100 = 25` — dentro da faixa "baixo" (0-25). Para um município entrar
-em "médio" (26-50), "alto" (51-75) ou "crítico" (>75), **múltiplos domínios**
-precisam contribuir simultaneamente.
+**Implementada Opção 4 (hybrid):**
+- Fórmula normalizada: `IRTC = sum(w_i*R_i for available) / sum(w_i for available)`
+- Novos campos: `data_coverage` (float 0..1), `max_domain_score` (0-100), `dominant_domain`
+- Migration 016 adicionou colunas em `irtc_scores`
+- `calc_r_X` agora retorna `(score, has_data)` tuples
+- FIRMS (ambiente) tem `has_data=True` sempre (cobertura global via satélite)
 
-Mas a cobertura real é desigual:
-- Climate: ~12 estações INMET (cobertura mínima do PR)
-- Fire spots: depende de eventos detectados pela NASA FIRMS (atualmente 2 no PR todo)
-- River levels: 8 estações ANA
-- Air quality: 4 cidades (capitais com AQICN)
-- Dengue: 399 municípios (cobertura completa via InfoDengue)
-
-**Resultado prático**: a maioria dos 399 municípios só tem dengue como input,
-ficam travados em IRTC ≤ 25 (faixa "baixo") permanentemente. **O IRTCLayer no
-mapa nunca mostra nada além de verde**, mesmo durante eventos extremos
-isolados.
-
-**Mitigações possíveis (a discutir com stakeholders):**
-- Aumentar `W_saude` de 0.25 pra 0.40 (dengue sozinho pode chegar a 40)
-- Capar agressivamente: epidemia → R_saude=200 truncado a 100
-- Reformular pra "IRTC = max disponível" em vez de "IRTC = média ponderada"
-- Estender cobertura das outras fontes (etl_clima cobrir mais estações INMET)
-- Aceitar que "baixo" é o valor honesto até cobertura aumentar (calibrar o
-  IRTC pra ser proporcional ao **% de risco máximo possível dado os dados
-  disponíveis**, não ao máximo absoluto)
+**Resultado em produção:** 140/399 munis (35%) reclassificados de "baixo" para
+"médio" ou "alto". 18 munis em epidemia corretamente marcados "alto" (IRTC=55.56).
+Commits `dab460d`..`e628f55`.
 
 ---
 
