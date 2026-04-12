@@ -8,10 +8,12 @@ Requires: requests, pdfplumber, supabase, python-dotenv
 """
 
 import io
+import json
 import os
 import re
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pdfplumber
 import requests
@@ -29,6 +31,7 @@ GETEC_USER = os.environ.get("GETEC_USER", "")
 GETEC_PASS = os.environ.get("GETEC_PASS", "")
 
 REPORT_URL = f"{BASE_URL}/relatorios/rel_acomp_lista_mun.php"
+GETEC_MUNICIPIOS_JSON = Path(__file__).parent / "getec_municipios.json"
 
 
 def upsert_cache(supabase_client, cache_key: str, data, source: str):
@@ -43,9 +46,15 @@ def upsert_cache(supabase_client, cache_key: str, data, source: str):
 
 
 def login(session: requests.Session) -> bool:
-    """Login to IDR-GETEC."""
+    """Login to IDR-GETEC.
+
+    The GETEC server always returns HTTP 200 even on failed login (just
+    re-shows the login form). A successful login redirects to principal.php
+    and sets a session cookie. We verify both redirect URL AND cookie
+    presence, not just status code.
+    """
     if not GETEC_USER or not GETEC_PASS:
-        print("  AVISO: Credenciais GETEC não configuradas")
+        print("  AVISO: Credenciais GETEC nao configuradas")
         return False
 
     try:
@@ -55,10 +64,17 @@ def login(session: requests.Session) -> bool:
             timeout=15,
             allow_redirects=True,
         )
-        if "principal.php" in resp.url or resp.status_code == 200:
-            print(f"  Autenticado no GETEC como {GETEC_USER}")
+        has_redirect = "principal.php" in resp.url
+        has_cookie = bool(session.cookies.get("PHPSESSID"))
+        # Check body for login failure indicators
+        body_lower = resp.text[:2000].lower()
+        has_error = "senha" in body_lower and ("incorreta" in body_lower or "invalida" in body_lower or "errada" in body_lower)
+
+        if has_redirect and not has_error:
+            print(f"  Autenticado no GETEC como {GETEC_USER} (cookie={has_cookie})")
             return True
-        print("  AVISO: Login GETEC pode ter falhado")
+
+        print(f"  AVISO: Login GETEC falhou (redirect={has_redirect}, cookie={has_cookie}, error_in_body={has_error})")
         return False
     except Exception as e:
         print(f"  Erro login GETEC: {e}")
@@ -66,27 +82,31 @@ def login(session: requests.Session) -> bool:
 
 
 def get_municipalities(session: requests.Session) -> list[dict]:
-    """Get list of municipalities from the search page or registration form."""
-    # Try the search page which has municipality selects
-    search_url = f"{BASE_URL}/telapesquisa/telapesquisa_regcli.php"
-    resp = session.get(search_url, params={"id": "1", "id2": GETEC_USER, "id3": "-1"}, timeout=15)
-    soup = BeautifulSoup(resp.text, "html.parser")
+    """Get list of GETEC municipalities.
 
-    munis = []
-    # Find any select with municipality options
-    for select in soup.find_all("select"):
-        for opt in select.find_all("option"):
-            code = opt.get("value", "")
-            name = opt.get_text(strip=True)
-            if code.isdigit() and int(code) >= 10 and "Selecione" not in name and len(name) > 2:
-                munis.append({"code": int(code), "name": name})
-        if len(munis) > 100:
-            break
+    Primary source: scripts/getec_municipios.json (committed to repo, no PII,
+    just code+name). This avoids depending on a live scrape that fails when
+    the login session is invalid or the GETEC server blocks CI runner IPs.
 
-    if not munis:
-        # Fallback: try the main registration page
-        resp = session.get(f"{BASE_URL}/principal.php", params={"content": "cad_regcli.php"}, timeout=15)
+    Fallback: scrape from the GETEC search page (requires valid session).
+    """
+    # Primary: static JSON (same pattern as pr_municipios.json for IBGE)
+    if GETEC_MUNICIPIOS_JSON.exists():
+        try:
+            with GETEC_MUNICIPIOS_JSON.open(encoding="utf-8") as f:
+                data = json.load(f)
+            print(f"  Lista de municipios carregada do JSON estatico ({len(data)} munis)")
+            return data
+        except Exception as e:
+            print(f"  Erro ao ler {GETEC_MUNICIPIOS_JSON.name}: {e} - tentando scrape")
+
+    # Fallback: scrape from GETEC search page
+    try:
+        search_url = f"{BASE_URL}/telapesquisa/telapesquisa_regcli.php"
+        resp = session.get(search_url, params={"id": "1", "id2": GETEC_USER, "id3": "-1"}, timeout=15)
         soup = BeautifulSoup(resp.text, "html.parser")
+
+        munis = []
         for select in soup.find_all("select"):
             for opt in select.find_all("option"):
                 code = opt.get("value", "")
@@ -96,17 +116,13 @@ def get_municipalities(session: requests.Session) -> list[dict]:
             if len(munis) > 100:
                 break
 
-    if not munis:
-        # Final fallback: use saved municipios.json
-        import json
-        muni_path = os.path.join(os.path.dirname(__file__), "..", "data", "idr-getec-raw", "municipios.json")
-        if os.path.exists(muni_path):
-            with open(muni_path, "r", encoding="utf-8") as f:
-                muni_dict = json.load(f)
-            munis = [{"code": int(k), "name": v} for k, v in muni_dict.items()]
-            print(f"  Usando municipios.json fallback")
+        if munis:
+            print(f"  {len(munis)} municipios via scrape GETEC")
+            return munis
+    except Exception as e:
+        print(f"  Erro ao scrape municipios GETEC: {e}")
 
-    return munis
+    return []
 
 
 def parse_atendimentos_pdf(pdf_bytes: bytes, ref_date: str) -> dict:
