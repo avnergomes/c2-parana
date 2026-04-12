@@ -84,11 +84,11 @@ def fetch_irtc_distribution():
 
 def fetch_active_alerts():
     """Contagem de notifications nao-lidas nas ultimas 24h."""
-    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
     rows = postgrest_get(
         "notifications",
         "id,severity",
-        {"created_at": f"gte.{since}"},
+        {"sent_at": f"gte.{since}"},
     )
     by_sev = {}
     for r in rows:
@@ -125,7 +125,7 @@ def fetch_dengue_summary():
 
 def fetch_climate_summary():
     """Resumo climatico das ultimas 6h."""
-    since = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%dT%H:%M:%SZ")
     rows = postgrest_get(
         "climate_data",
         "temperature,humidity",
