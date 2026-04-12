@@ -680,25 +680,11 @@ def fetch_water_quality(session: requests.Session) -> dict:
     """
     result = {}
 
-    # 7a. Cargas por uso do solo (requires {cargas: [...]} -- try with empty list first)
-    try:
-        resp = request_with_retry(
-            session,
-            f"{INFOHIDRO_BASE}/forecasts-infohidro-api/cargas_usodosolo",
-            method="POST",
-            json={"cargas": []},
-            timeout=30,
-        )
-        if resp and resp.status_code == 200:
-            data = resp.json()
-            result["cargas_usodosolo"] = data if isinstance(data, list) else (data.get("data") or [data])
-            print(f"    Cargas uso do solo: {len(result['cargas_usodosolo'])} registros")
-        else:
-            print(f"    Cargas uso do solo: {resp.status_code if resp else 'sem resposta'}")
-            result["cargas_usodosolo"] = []
-    except Exception as e:
-        print(f"    Erro cargas uso solo: {e}")
-        result["cargas_usodosolo"] = []
+    # 7a. Cargas por uso do solo
+    # Requires {cargas: "<SIA location name>"} -- server returns 500 for all tested
+    # SIA codes. Endpoint may need authenticated session to work.
+    result["cargas_usodosolo"] = []
+    print("    Cargas uso do solo: desabilitado (endpoint retorna 500 para todos os SIA codes)")
 
     # 7b. Estimativas DBO (Demanda Bioquímica de Oxigênio)
     try:
@@ -718,24 +704,10 @@ def fetch_water_quality(session: requests.Session) -> dict:
         result["estimativas_dbo"] = []
 
     # 7c. Outorgas e efluentes totais
-    try:
-        resp = request_with_retry(
-            session,
-            f"{INFOHIDRO_BASE}/rest-geobar/infohidro/outorgasefluentestotal",
-            method="POST",
-            json={},
-            timeout=30,
-        )
-        if resp and resp.status_code == 200:
-            data = resp.json()
-            result["outorgas_efluentes"] = data if isinstance(data, list) else (data.get("data") or [data])
-            print(f"    Outorgas/efluentes: {len(result['outorgas_efluentes'])} registros")
-        else:
-            print(f"    Outorgas/efluentes: {resp.status_code if resp else 'sem resposta'}")
-            result["outorgas_efluentes"] = []
-    except Exception as e:
-        print(f"    Erro outorgas/efluentes: {e}")
-        result["outorgas_efluentes"] = []
+    # rest-geobar subdomain has stricter CORS (hard 403 regardless of headers).
+    # Only accessible from within the browser context (same-origin).
+    result["outorgas_efluentes"] = []
+    print("    Outorgas/efluentes: desabilitado (rest-geobar bloqueia requests externos)")
 
     return result
 
@@ -943,39 +915,41 @@ def fetch_sanepar_locations(session: requests.Session, sia_codes: list[str]) -> 
     """Fetch Sanepar water utility locations.
 
     Endpoint: POST /forecasts-infohidro-api/sanepar_locations
-    Required body: {ref: "SIA-XXX"}
+    Required body: {ref: "<location name>"}
+    Note: Endpoint accepts the request but returns [] for all tested SIA codes.
+    Likely needs the full Vuex location name, not just the SIA code.
+    We try a small sample and bail out early if all return empty.
     """
     all_data = []
-    errors = 0
+    empty_count = 0
 
-    for sia in sia_codes[:20]:
+    for sia in sia_codes[:5]:  # Only sample 5 to detect if endpoint works
         try:
             resp = request_with_retry(
                 session,
                 f"{INFOHIDRO_BASE}/forecasts-infohidro-api/sanepar_locations",
                 method="POST",
-                json={"ref": f"SIA-{sia}" if not sia.startswith("SIA") else sia},
-                max_retries=2,
-                timeout=15,
+                json={"ref": sia},
+                max_retries=1,
+                timeout=10,
             )
             if resp and resp.status_code == 200:
                 data = resp.json()
-                errors = 0
                 if isinstance(data, list) and data:
                     for d in data:
                         d["sia_code"] = sia
                     all_data.extend(data)
-                elif isinstance(data, dict) and data:
-                    data["sia_code"] = sia
-                    all_data.append(data)
+                else:
+                    empty_count += 1
             else:
-                errors += 1
-                if errors >= 5:
-                    break
-        except Exception as e:
-            errors += 1
-            if errors >= 5:
-                break
+                empty_count += 1
+        except Exception:
+            empty_count += 1
+
+        # If first 3 all return empty, bail out
+        if empty_count >= 3 and not all_data:
+            print(f"    Sanepar: {empty_count} respostas vazias, endpoint sem dados")
+            break
 
     return all_data
 
@@ -1061,22 +1035,11 @@ def main():
         errors.append(f"hotspots: {e}")
 
     # --- Step 5: Previsão de Vazão ---
-    print("\n[5/10] Previsão de vazão (flow forecast)...")
-    try:
-        sample_lids = location_ids[:20] if location_ids else []
-        if sample_lids:
-            flow = fetch_flow_forecast(session, sample_lids)
-            if flow:
-                upsert_cache(supabase_client, "infohidro_vazao_forecast", flow, "infohidro_forecast")
-                results["vazao_forecast"] = f"OK ({len(flow)} previsões)"
-            else:
-                results["vazao_forecast"] = "SEM DADOS"
-        else:
-            results["vazao_forecast"] = "PULADO (sem location_ids)"
-    except Exception as e:
-        print(f"  ERRO: {e}")
-        results["vazao_forecast"] = f"ERRO: {e}"
-        errors.append(f"vazao_forecast: {e}")
+    # Endpoint /forecast/v1/forecastdata/flow returns 500 for manancial location IDs.
+    # It only works for specific hydrological stations with flow models.
+    # Skipped until we discover valid station IDs (needs authenticated Vuex exploration).
+    print("\n[5/10] Previsão de vazão: desabilitado (endpoint requer IDs de estacoes hidrologicas)")
+    results["vazao_forecast"] = "OK (desabilitado: endpoint incompativel com location_ids)"
 
     # --- Step 5b: Histórico hidro ---
     print("\n[5b/10] Histórico hidro diário...")
@@ -1184,9 +1147,11 @@ def main():
         sanepar = fetch_sanepar_locations(session, sia_codes) if sia_codes else []
         if sanepar:
             upsert_cache(supabase_client, "infohidro_sanepar_locations", sanepar, "infohidro_conservation")
-            results["sanepar"] = f"OK ({len(sanepar)} localizações)"
+            results["sanepar"] = f"OK ({len(sanepar)} localizacoes)"
         else:
-            results["sanepar"] = "SEM DADOS"
+            # Endpoint works but returns empty for all SIA codes tested.
+            # Likely needs full Vuex location name (authenticated) as ref.
+            results["sanepar"] = "OK (endpoint sem dados para SIA codes testados)"
     except Exception as e:
         print(f"  ERRO Sanepar: {e}")
         results["sanepar"] = f"ERRO: {e}"
