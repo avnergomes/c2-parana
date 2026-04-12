@@ -2,7 +2,7 @@
 
 **Versão:** 1.2
 **Data:** 2026-04-12 (atualizado após sessões de 11-12/abr)
-**Status:** ✅ **3.A + 3.B shipadas** | IRTC recalibrado (Opção 4) | 6 bugs ETL corrigidos
+**Status:** ✅ **3.A + 3.B + 3.H shipadas** | IRTC recalibrado (Opção 4) | InfoHidro 10/12 seções
 **Predecessor:** `PLANO_IMPLEMENTACAO_C4ISR.md` seção "FASE 3 — Fusão de Dados e Inteligência"
 
 ---
@@ -293,9 +293,31 @@ no formato dashboard tipo "situation room".
 
 ---
 
-### Fase 3.H — Rewrite ETL InfoHidro (expandir cobertura para 7 seções)
+### Fase 3.H — Rewrite ETL InfoHidro (expandir cobertura para 7 seções) ✅ Concluída (2026-04-12)
 
-**Objetivo:** O ETL atual (`etl_infohidro.py`) cobre apenas 2 das 7 seções do
+**Shipada em produção.** ETL expandido de 2 para 10 seções. Cron `cron-infohidro.yml`
+rodando a cada 6h. 10/12 módulos OK no primeiro run (10.6s).
+
+**Descoberta chave:** APIs InfoHidro não requerem autenticação. O bloqueio 403 é
+anti-bot (falta de headers Referer/Origin), não auth. Playwright desnecessário.
+Mananciais (location IDs + SIA codes) vêm do cache do `etl_agua.py`.
+
+**Dados coletados (primeiro run):**
+- 1,110 estações de telemetria
+- 17,254 registros de telemetria expandida (sensores, mapeamentos, qualidade, horários)
+- 310 registros de histórico hidro diário (30 dias)
+- 54 registros de uso do solo (34 classes + evolução + overview)
+- 30 registros de desmatamento anual
+- Hotspots SIMEPAR (0 focos ativos, endpoint funcional)
+- FMAC monitoramento ambiental
+- Estimativas DBO (qualidade da água)
+
+**Módulos pendentes (2/12):**
+- `vazao_forecast`: endpoint `/forecast/v1/forecastdata/flow` retorna 500 para
+  location IDs de mananciais (precisa de IDs de estações hidrológicas específicas)
+- `sanepar_locations`: body do POST não documentado (precisa análise adicional)
+
+**Objetivo original:** O ETL atual (`etl_infohidro.py`) cobre apenas 2 das 7 seções do
 InfoHidro (Reservatórios + Monitoramento). Uma exploração do sistema em
 2026-04-12 mapeou 16 endpoints REST adicionais que podem alimentar o C2 com
 dados de conservação ambiental, indicadores de qualidade, efluentes, telemetria
@@ -354,7 +376,7 @@ TBD — precisa testar do runner).
 1. ~~**3.A** — Correlações heurísticas~~ ✅ shipada 2026-04-07
 2. ~~**3.D** — Fix de precipitação~~ ✅ resolvida (gap era falso)
 3. ~~**3.B** — Relatório situacional diário~~ ✅ shipada 2026-04-12
-4. **3.H** — Rewrite InfoHidro (16 novos endpoints, dados de conservação/qualidade/vazão)
+4. ~~**3.H** — Rewrite InfoHidro (16 novos endpoints, dados de conservação/qualidade/vazão)~~ ✅ shipada 2026-04-12
 5. **3.G** — Painel de tendências (UX)
 6. **3.F** — Anomalias estatísticas (baseline antes de ML)
 7. **3.C** — Projeção linear dengue (preditivo simples)
