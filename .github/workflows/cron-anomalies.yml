@@ -1,0 +1,35 @@
+# .github/workflows/cron-anomalies.yml
+# Budget: ~4 min/dia (4 exec × ~1 min)
+# Deteccao de anomalias estatisticas via z-score (Fase 3.F)
+name: ETL Anomalias Estatisticas
+
+on:
+  schedule:
+    - cron: '45 */6 * * *'   # A cada 6 horas (offset dos demais crons)
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  etl-anomalies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: pip install -r scripts/requirements.txt
+
+      - name: Executar ETL Anomalias
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/etl_anomalies.py
