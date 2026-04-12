@@ -255,12 +255,16 @@ def main():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     })
 
-    # Login — attempt but don't abort on failure. The GETEC server blocks
-    # non-Brazilian IPs (GitHub Actions runners), but some report endpoints
-    # may work without auth. We log the failure and continue anyway.
+    # Login — the GETEC server blocks non-Brazilian IPs (GitHub Actions
+    # runners). If login fails, skip PDF fetching entirely to avoid 409
+    # requests × 30s timeout each (= 3.4 hours of wasted CI time).
+    # Data from previous local runs remains in Supabase untouched.
     logged_in = login(session)
     if not logged_in:
-        print("  AVISO: Login GETEC falhou (provavel bloqueio de IP). Tentando continuar sem auth...")
+        print("  AVISO: Login GETEC falhou (provavel bloqueio de IP do runner).")
+        print("  Pulando busca de PDFs. Execute localmente para atualizar dados.")
+        print("ETL GETEC Atendimentos finalizado (sem dados novos).")
+        return
 
     # Get municipalities
     print("1/3 Buscando lista de municípios...")
