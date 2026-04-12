@@ -69,9 +69,17 @@ def login(session: requests.Session) -> bool:
         # Check body for login failure indicators
         body_lower = resp.text[:2000].lower()
         has_error = "senha" in body_lower and ("incorreta" in body_lower or "invalida" in body_lower or "errada" in body_lower)
+        # Some pages serve main content inline after login (no redirect)
+        has_main_content = "principal" in body_lower or "menu" in body_lower or "logout" in body_lower
 
-        if has_redirect and not has_error:
-            print(f"  Autenticado no GETEC como {GETEC_USER} (cookie={has_cookie})")
+        if has_error:
+            print(f"  AVISO: Login GETEC falhou (credenciais invalidas)")
+            return False
+
+        # Accept login if: redirected to principal, OR got session cookie,
+        # OR response body contains main content indicators
+        if has_redirect or has_cookie or has_main_content:
+            print(f"  Autenticado no GETEC como {GETEC_USER} (redirect={has_redirect}, cookie={has_cookie})")
             return True
 
         print(f"  AVISO: Login GETEC falhou (redirect={has_redirect}, cookie={has_cookie}, error_in_body={has_error})")
