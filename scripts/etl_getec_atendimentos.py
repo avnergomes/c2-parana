@@ -196,10 +196,17 @@ def fetch_atendimentos(session: requests.Session, municipalities: list[dict], re
     date_histogram: dict[str, int] = {}
     total = len(municipalities)
     year = ref_date[:4]
+    consecutive_failures = 0
 
     for i, mun in enumerate(municipalities):
         if i > 0 and i % 50 == 0:
             print(f"  Progresso: {i}/{total} municípios processados")
+
+        # If first 5 requests all fail (timeout/connection error), the
+        # server is unreachable (CI runner IP blocked). Abort early.
+        if consecutive_failures >= 5:
+            print(f"  AVISO: {consecutive_failures} falhas consecutivas. Servidor GETEC inacessivel. Abortando.")
+            break
 
         try:
             resp = session.post(
@@ -227,10 +234,11 @@ def fetch_atendimentos(session: requests.Session, municipalities: list[dict], re
                     "Categoria": "-1",
                     "CodTpe": "-1",
                 },
-                timeout=30,
+                timeout=10,
             )
 
             if resp.status_code == 200 and resp.content[:4] == b"%PDF":
+                consecutive_failures = 0
                 parsed = parse_atendimentos_pdf(resp.content, ref_date)
                 if parsed["produtores_atendidos"] > 0:
                     results.append({
@@ -244,9 +252,13 @@ def fetch_atendimentos(session: requests.Session, municipalities: list[dict], re
                     # Merge date counts into global histogram
                     for dt, count in parsed["datas"].items():
                         date_histogram[dt] = date_histogram.get(dt, 0) + count
+            else:
+                consecutive_failures += 1
 
         except Exception as e:
-            print(f"    Erro {mun['name']}: {e}")
+            consecutive_failures += 1
+            if consecutive_failures <= 3:
+                print(f"    Erro {mun['name']}: {e}")
             continue
 
         time.sleep(0.15)
@@ -263,16 +275,15 @@ def main():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     })
 
-    # Login — the GETEC server blocks non-Brazilian IPs (GitHub Actions
-    # runners). If login fails, skip PDF fetching entirely to avoid 409
-    # requests × 30s timeout each (= 3.4 hours of wasted CI time).
-    # Data from previous local runs remains in Supabase untouched.
+    # Login — try but don't abort on failure. The GETEC server may not
+    # require auth for PDF report endpoints (especially from Brazilian IPs).
+    # The old code always "succeeded" login via status==200 fallback, and
+    # PDFs were fetched without real auth. On CI runners (non-BR IPs), the
+    # server blocks all requests regardless of auth, so we set a short
+    # timeout to fail fast.
     logged_in = login(session)
     if not logged_in:
-        print("  AVISO: Login GETEC falhou (provavel bloqueio de IP do runner).")
-        print("  Pulando busca de PDFs. Execute localmente para atualizar dados.")
-        print("ETL GETEC Atendimentos finalizado (sem dados novos).")
-        return
+        print("  AVISO: Login GETEC nao confirmado. Tentando buscar PDFs mesmo assim...")
 
     # Get municipalities
     print("1/3 Buscando lista de municípios...")
