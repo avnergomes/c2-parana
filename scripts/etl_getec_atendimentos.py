@@ -255,10 +255,12 @@ def main():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     })
 
-    # Login
-    if not login(session):
-        print("  FALHA: Não foi possível autenticar no GETEC")
-        return
+    # Login — attempt but don't abort on failure. The GETEC server blocks
+    # non-Brazilian IPs (GitHub Actions runners), but some report endpoints
+    # may work without auth. We log the failure and continue anyway.
+    logged_in = login(session)
+    if not logged_in:
+        print("  AVISO: Login GETEC falhou (provavel bloqueio de IP). Tentando continuar sem auth...")
 
     # Get municipalities
     print("1/3 Buscando lista de municípios...")
