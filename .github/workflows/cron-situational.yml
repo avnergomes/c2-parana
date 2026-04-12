@@ -1,0 +1,29 @@
+name: ETL Relatorio Situacional (Fase 3.B)
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # 06:00 BRT = 09:00 UTC, diario
+  workflow_dispatch: {}
+
+jobs:
+  etl-situational:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: pip install -r scripts/requirements.txt
+
+      - name: Gerar relatorio situacional
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/etl_situational_report.py
