@@ -260,7 +260,10 @@ def fetch_dengue_municipality(mun: dict, limiter: AdaptiveRateLimiter) -> dict:
             records = resp.json()
             dengue_records = []
 
-            for rec in records[-4:]:  # ultimas 4 semanas
+            # InfoDengue returns records in DESCENDING order (newest first).
+            # records[:4] takes the 4 most recent weeks; the previous
+            # records[-4:] was taking the 4 OLDEST (weeks 1-4 of 2025).
+            for rec in records[:4]:
                 try:
                     se = int(rec.get("SE", 0))
                     year = int(str(se)[:4]) if se > 10000 else CURRENT_YEAR
