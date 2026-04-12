@@ -27,6 +27,7 @@ const LegislativoPage = lazy(() => import('@/pages/LegislativoPage').then(m => (
 const AguaPage = lazy(() => import('@/pages/AguaPage').then(m => ({ default: m.AguaPage })))
 const AlertasPage = lazy(() => import('@/pages/AlertasPage').then(m => ({ default: m.AlertasPage })))
 const NotificationPrefsPage = lazy(() => import('@/pages/NotificationPrefsPage').then(m => ({ default: m.NotificationPrefsPage })))
+const RelatoriosPage = lazy(() => import('@/pages/RelatoriosPage').then(m => ({ default: m.RelatoriosPage })))
 
 export function AppRouter() {
   return (
@@ -55,6 +56,7 @@ export function AppRouter() {
           <Route path="/noticias" element={<NoticiasPage />} />
           <Route path="/legislativo" element={<LegislativoPage />} />
           <Route path="/alertas" element={<AlertasPage />} />
+          <Route path="/relatorios" element={<RelatoriosPage />} />
           <Route path="/configuracoes/notificacoes" element={<NotificationPrefsPage />} />
         </Route>
 
