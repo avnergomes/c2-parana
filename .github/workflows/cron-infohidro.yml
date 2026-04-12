@@ -1,0 +1,38 @@
+# .github/workflows/cron-infohidro.yml
+# Budget: ~20 min/dia (4 exec × ~5 min)
+# Fonte: InfoHidro/SIMEPAR REST APIs (conservação, qualidade, vazão, telemetria)
+# Complementa cron-agua.yml (mananciais + reservatórios)
+name: ETL InfoHidro Expandido
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # A cada 6 horas (4 exec/dia), offset 30min do cron-agua
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  etl-infohidro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r scripts/requirements.txt
+
+      - name: Executar ETL InfoHidro
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          INFOHIDRO_USER: ${{ secrets.INFOHIDRO_USER }}
+          INFOHIDRO_PASS: ${{ secrets.INFOHIDRO_PASS }}
+        run: python scripts/etl_infohidro.py
