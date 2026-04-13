@@ -3,6 +3,7 @@ import { useSaudeKpis, useLeitosSUS } from '@/hooks/useSaude'
 import { DengueMapaCoro } from '@/components/saude/DengueMapaCoro'
 import { AlertasMunicipios } from '@/components/saude/AlertasMunicipios'
 import { DengueSerieTemporal } from '@/components/saude/DengueSerieTemporal'
+import { DengueProjecoes } from '@/components/saude/DengueProjecoes'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { PaywallModal } from '@/components/ui/PaywallModal'
@@ -72,9 +73,17 @@ export function SaudePage() {
         </ErrorBoundary>
       </div>
 
+      {/* Projecoes de dengue */}
+      <div>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Projecoes (+4 semanas)</h2>
+        <ErrorBoundary moduleName="projecoes dengue">
+          <DengueProjecoes />
+        </ErrorBoundary>
+      </div>
+
       {/* Tabela de alertas */}
       <div>
-        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Municípios com Alertas</h2>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Municipios com Alertas</h2>
         <ErrorBoundary moduleName="alertas municípios">
           <AlertasMunicipios />
         </ErrorBoundary>
