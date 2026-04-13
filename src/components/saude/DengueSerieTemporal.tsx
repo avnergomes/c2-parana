@@ -15,6 +15,8 @@ export function DengueSerieTemporal() {
   }, {} as Record<string, { week: string; total: number; municipios: number }>)
 
   const chartData = Object.values(byWeek || {})
+    .sort((a, b) => a.week.localeCompare(b.week))
+    .slice(-12)
 
   if (isLoading) return <div className="h-40 bg-background-elevated rounded animate-pulse" />
 
