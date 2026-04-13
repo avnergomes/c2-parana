@@ -1,8 +1,8 @@
 # Plano de Implementação — Fase 3 (Intelligence)
 
-**Versão:** 1.2
-**Data:** 2026-04-12 (atualizado após sessões de 11-12/abr)
-**Status:** ✅ **Fase 3 completa (7/8 sub-fases)** | 3.E bloqueada (historico insuficiente)
+**Versão:** 1.3
+**Data:** 2026-04-13 (atualizado apos sessoes de 11-13/abr)
+**Status:** ✅ **Fase 3 completa (7/8 sub-fases + frontend)** | 3.E bloqueada (historico insuficiente)
 **Predecessor:** `PLANO_IMPLEMENTACAO_C4ISR.md` seção "FASE 3 — Fusão de Dados e Inteligência"
 
 ---
@@ -457,4 +457,68 @@ Commits `dab460d`..`e628f55`.
 
 ---
 
-*Este documento é vivo. Atualizar após cada sub-fase entregue.*
+## 8. Sessao 2026-04-12/13 — Entrega completa da Fase 3
+
+### Commits shipados (sessao 12-13/abr)
+
+| Commit | Escopo | Arquivos |
+|---|---|---|
+| `c60cb07` | cron-infohidro.yml | workflow InfoHidro 6h |
+| `80809f4` | etl_infohidro.py expandido | 10 secoes, 17k registros |
+| `73d9e7f` | fix endpoints quebrados | desabilitar 500/403, circuit breaker |
+| `197b6ba` | useTendencias.ts | 4 hooks de tendencias |
+| `9e996a4` | TendenciasPage.tsx | 4 charts Recharts |
+| `74f4c76` | router /tendencias | rota lazy-loaded |
+| `712f778` | Sidebar tendencias | nav item com icone |
+| `ac8bbc3` | migration 018 | tabela anomalies |
+| `69052dc` | etl_anomalies.py | z-score rolling window |
+| `949c124` | cron-anomalies.yml | workflow 6h |
+| `82dfab4` | migration 019 | tabela dengue_projections |
+| `fb5528f` | etl_dengue_projections.py | regressao linear 399 munis |
+| `2813021` | cron-dengue-projections.yml | workflow diario |
+| `3a6eb35` | useDengueProjections.ts | hook + summary |
+| `f031b28` | DengueProjecoes.tsx | chart + lista em alta |
+| `5ecf332` | SaudePage + projecoes | secao integrada |
+| `7d4d198` | useAnomalias.ts | hook anomalias |
+| `109a2f0` | TendenciasPage + anomalias | 5o card no grid |
+| `11e827f` | useInfoHidroExpandido.ts | 7 cache keys |
+| `1c8dccc` | AguaPage + tab Dados Ambientais | 11 secoes por dominio |
+
+### Inventario final — Fase 3
+
+**Backend (ETL + cron + migrations):**
+
+| Sub-fase | Script | Cron | Migration | Dados em producao |
+|---|---|---|---|---|
+| 3.A | etl_correlations.py | cron-correlations.yml | 014, 015 | regras compostas |
+| 3.B | etl_situational_report.py | cron-situational.yml | 017 | relatorio diario |
+| 3.C | etl_dengue_projections.py | cron-dengue-projections.yml | 019 | 1596 projecoes, 7 em alta |
+| 3.F | etl_anomalies.py | cron-anomalies.yml | 018 | z-score (aguardando historico) |
+| 3.G | — | — | — | frontend only |
+| 3.H | etl_infohidro.py | cron-infohidro.yml | — | 17k+ registros, 12/12 OK |
+
+**Frontend (hooks + componentes + paginas):**
+
+| Pagina | Componentes novos | Hooks novos |
+|---|---|---|
+| /tendencias | TemperaturaChart, FocosChart, DengueChart, IRTCGauge, AnomaliasPanel | useTendencias (4), useAnomalias |
+| /saude | DengueProjecoes | useDengueProjections |
+| /agua (tab) | DadosAmbientaisTab | useInfoHidroExpandido (7) |
+| /relatorios | (sessao anterior) | useRelatorios |
+
+### Historico de dados (bloqueio para 3.E)
+
+| Tabela | Registros | Periodo | Meses |
+|---|---|---|---|
+| dengue_data | 3,192 | 2025-SE1 a 2026-SE13 | ~15 |
+| fire_spots | ~500 | 2026-03-18 a 04-12 | <1 |
+| climate_data | ~200 | 2026-04-10 a 04-12 | <0.1 |
+| air_quality | ~10 | 2026-04-12 | <0.1 |
+| river_levels | ~16 | 2026-04-11 a 04-12 | <0.1 |
+
+3.E (ML real) requer >= 12 meses em todos os dominios. Estimativa: viavel a
+partir de ~2027-04 com os crons acumulando dados continuamente.
+
+---
+
+*Este documento e vivo. Fase 3 concluida. Proximo: Fase 4 (C4ISR Completo).*
