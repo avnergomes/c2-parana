@@ -1,5 +1,5 @@
 // src/pages/TendenciasPage.tsx
-import { TrendingUp, Thermometer, Flame, Bug, Shield } from 'lucide-react'
+import { TrendingUp, Thermometer, Flame, Bug, Shield, AlertTriangle } from 'lucide-react'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
@@ -10,6 +10,7 @@ import {
   useDengueTrend,
   useIRTCDistribuicao,
 } from '@/hooks/useTendencias'
+import { useAnomalias } from '@/hooks/useAnomalias'
 
 const IRTC_COLORS: Record<string, string> = {
   baixo: '#10b981',
@@ -234,6 +235,57 @@ function IRTCGauge() {
   )
 }
 
+const INDICATOR_UNIT: Record<string, string> = {
+  temperature: '°C',
+  humidity: '%',
+  aqi: ' AQI',
+}
+
+function AnomaliasPanel() {
+  const { data: anomalias, isLoading } = useAnomalias(7)
+
+  return (
+    <ChartCard
+      title="Anomalias Estatisticas"
+      icon={<AlertTriangle size={16} />}
+      subtitle="Ultimos 7 dias (z-score > 3)"
+      loading={isLoading}
+    >
+      {anomalias && anomalias.length > 0 ? (
+        <div className="space-y-2 px-2">
+          {anomalias.slice(0, 8).map(a => {
+            const unit = INDICATOR_UNIT[a.indicator] || ''
+            const direction = a.z_score > 0 ? 'acima' : 'abaixo'
+            const severity = Math.abs(a.z_score) >= 4 ? 'text-status-danger' : 'text-status-warning'
+            return (
+              <div key={a.id} className="flex items-center gap-2 text-xs py-1 border-b border-border/30 last:border-0">
+                <AlertTriangle size={12} className={severity} />
+                <span className="text-text-primary font-medium flex-1">
+                  {a.municipality || a.station_code}
+                </span>
+                <span className="text-text-secondary">
+                  {a.indicator} {direction}
+                </span>
+                <span className="font-mono text-text-primary">
+                  {a.observed_value}{unit}
+                </span>
+                <span className={`font-mono text-2xs ${severity}`}>
+                  z={a.z_score.toFixed(1)}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <p className="text-xs text-text-muted text-center py-12">
+          Nenhuma anomalia detectada nos ultimos 7 dias.
+          O detector precisa de 30+ observacoes por estacao para funcionar.
+        </p>
+      )}
+    </ChartCard>
+  )
+}
+
 export function TendenciasPage() {
   return (
     <div className="p-6 space-y-6 max-w-5xl">
@@ -252,6 +304,7 @@ export function TendenciasPage() {
         <FocosChart />
         <DengueChart />
         <IRTCGauge />
+        <AnomaliasPanel />
       </div>
     </div>
   )
