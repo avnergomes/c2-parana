@@ -85,14 +85,27 @@ export function useDengueTrend(semanas = 8) {
   return useQuery({
     queryKey: ['tendencias-dengue', semanas],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('dengue_data')
-        .select('epidemiological_week, year, cases')
-        .order('year', { ascending: true })
-        .order('epidemiological_week', { ascending: true })
-        .limit(10000) as { data: Pick<DengueRow, 'epidemiological_week' | 'year' | 'cases'>[] | null }
+      // Paginate: Supabase caps at 1000 rows, with 399 munis/week we need multiple pages
+      const allRows: Pick<DengueRow, 'epidemiological_week' | 'year' | 'cases'>[] = []
+      let offset = 0
+      const pageSize = 1000
 
-      if (!data || data.length === 0) return []
+      while (true) {
+        const { data } = await supabase
+          .from('dengue_data')
+          .select('epidemiological_week, year, cases')
+          .order('year', { ascending: true })
+          .order('epidemiological_week', { ascending: true })
+          .range(offset, offset + pageSize - 1) as { data: Pick<DengueRow, 'epidemiological_week' | 'year' | 'cases'>[] | null }
+
+        const rows = data || []
+        allRows.push(...rows)
+        if (rows.length < pageSize) break
+        offset += pageSize
+      }
+
+      if (allRows.length === 0) return []
+      const data = allRows
 
       // Aggregate by week
       const byWeek: Record<string, number> = {}
