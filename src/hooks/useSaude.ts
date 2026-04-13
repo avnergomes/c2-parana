@@ -39,25 +39,39 @@ export function useDengueSerie(ibgeCode?: string, semanas = 12) {
   return useQuery({
     queryKey: ['dengue-serie', ibgeCode, semanas],
     queryFn: async () => {
-      let query = supabase
-        .from('dengue_data')
-        .select('ibge_code, municipality_name, epidemiological_week, year, cases, alert_level')
-        .order('year', { ascending: true })
-        .order('epidemiological_week', { ascending: true })
-
       if (ibgeCode) {
-        // Com filtro por município: limitar pelas semanas solicitadas
-        query = query.eq('ibge_code', ibgeCode).limit(semanas)
-      } else {
-        // State-wide: buscar todos os dados disponíveis no banco.
-        // O ETL armazena ~4 semanas por município por run, mas dados
-        // históricos de runs anteriores acumulam. O chart agrega por
-        // semana, então precisamos de todos os registros disponíveis.
-        query = query.limit(10000)
+        const { data } = await supabase
+          .from('dengue_data')
+          .select('ibge_code, municipality_name, epidemiological_week, year, cases, alert_level')
+          .eq('ibge_code', ibgeCode)
+          .order('year', { ascending: true })
+          .order('epidemiological_week', { ascending: true })
+          .limit(semanas) as { data: Pick<DengueDataRow, 'ibge_code' | 'municipality_name' | 'epidemiological_week' | 'year' | 'cases' | 'alert_level'>[] | null }
+        return data || []
       }
 
-      const { data } = await query as { data: Pick<DengueDataRow, 'ibge_code' | 'municipality_name' | 'epidemiological_week' | 'year' | 'cases' | 'alert_level'>[] | null }
-      return data || []
+      // State-wide: Supabase caps at 1000 rows per request.
+      // With 399 municipalities per week, we need to paginate.
+      const allRows: Pick<DengueDataRow, 'ibge_code' | 'municipality_name' | 'epidemiological_week' | 'year' | 'cases' | 'alert_level'>[] = []
+      let offset = 0
+      const pageSize = 1000
+
+      while (true) {
+        const { data } = await supabase
+          .from('dengue_data')
+          .select('ibge_code, municipality_name, epidemiological_week, year, cases, alert_level')
+          .order('year', { ascending: true })
+          .order('epidemiological_week', { ascending: true })
+          .range(offset, offset + pageSize - 1) as { data: Pick<DengueDataRow, 'ibge_code' | 'municipality_name' | 'epidemiological_week' | 'year' | 'cases' | 'alert_level'>[] | null }
+
+        const rows = data || []
+        allRows.push(...rows)
+
+        if (rows.length < pageSize) break
+        offset += pageSize
+      }
+
+      return allRows
     },
     staleTime: 1000 * 60 * 60,
   })
