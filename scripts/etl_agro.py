@@ -258,12 +258,25 @@ def fetch_emprego_agro():
                 anterior = valores[1]["pessoal_ocupado"] if len(valores) > 1 else atual
                 variacao = ((atual - anterior) / anterior * 100) if anterior else 0
 
+                # CEMPRE is annual. Project each year as ano_mes=YYYY-12 and
+                # saldo=estoque(ano)-estoque(ano-1) so AgroPage filter keeps rows.
+                asc = list(reversed(valores))
+                serie = []
+                for idx, v in enumerate(asc):
+                    prev = asc[idx - 1]["pessoal_ocupado"] if idx > 0 else v["pessoal_ocupado"]
+                    serie.append({
+                        "ano": v["ano"],
+                        "ano_mes": f"{v['ano']}-12",
+                        "pessoal_ocupado": int(v["pessoal_ocupado"]),
+                        "saldo": int(v["pessoal_ocupado"] - prev),
+                    })
+
                 return {
                     "estoque_atual": int(atual),
                     "saldo_mes": int((atual - anterior) / 12) if len(valores) > 1 else 0,
                     "variacao_yoy": round(variacao, 1),
                     "ano_referencia": valores[0]["ano"],
-                    "serie": valores[:5],
+                    "serie": serie[-5:],
                 }
 
         print("  SIDRA emprego no data, using fallback")
@@ -282,51 +295,72 @@ def get_emprego_fallback():
         "variacao_yoy": 2.1,
         "ano_referencia": "2023",
         "serie": [
-            {"ano": "2023", "pessoal_ocupado": 485000},
-            {"ano": "2022", "pessoal_ocupado": 475000},
-            {"ano": "2021", "pessoal_ocupado": 462000},
+            {"ano": "2021", "ano_mes": "2021-12", "pessoal_ocupado": 462000, "saldo": 0},
+            {"ano": "2022", "ano_mes": "2022-12", "pessoal_ocupado": 475000, "saldo": 13000},
+            {"ano": "2023", "ano_mes": "2023-12", "pessoal_ocupado": 485000, "saldo": 10000},
         ],
     }
 
 
+def _fetch_sicor_year(ano: int):
+    """Fetch SICOR CusteioMunicipio for a single year. Returns (total, items)."""
+    url = (
+        "https://olinda.bcb.gov.br/olinda/servico/SICOR/versao/v2/odata/CusteioMunicipio"
+        f"?$filter=UF%20eq%20'PR'%20and%20AnoEmissao%20eq%20{ano}&$format=json&$top=5000"
+    )
+    resp = request_with_retry("GET", url, max_retries=2, timeout=45)
+    if resp and isinstance(resp, dict):
+        items = resp.get("value", []) or []
+        total = sum(float(i.get("VlCusteio", 0) or 0) for i in items)
+        return total, items
+    return 0.0, []
+
+
 def fetch_credito_rural():
-    """Busca dados SICOR/BACEN de crédito rural (KPIs + por município)."""
+    """Busca dados SICOR/BACEN de crédito rural (KPIs + por município + série anual)."""
     try:
         now = datetime.now()
         ano = now.year
 
-        url = f"https://olinda.bcb.gov.br/olinda/servico/SICOR/versao/v2/odata/CusteioMunicipio?$filter=UF%20eq%20'PR'%20and%20AnoEmissao%20eq%20{ano}&$format=json&$top=5000"
+        total, items = _fetch_sicor_year(ano)
 
-        resp = request_with_retry("GET", url, max_retries=3, timeout=60)
+        if items:
+            num_contratos = len(items)
 
-        if resp and isinstance(resp, dict):
-            items = resp.get("value", [])
+            # Agregar por município (ibge_code)
+            mun_agg = {}
+            for i in items:
+                ibge = str(i.get("cdMunicipio", ""))
+                nome = i.get("Municipio", "")
+                valor = float(i.get("VlCusteio", 0) or 0)
+                if ibge not in mun_agg:
+                    mun_agg[ibge] = {"ibge_code": ibge, "municipio": nome, "valor_total": 0.0, "num_contratos": 0}
+                mun_agg[ibge]["valor_total"] += valor
+                mun_agg[ibge]["num_contratos"] += 1
 
-            if items:
-                total = sum(float(i.get("VlCusteio", 0) or 0) for i in items)
-                num_contratos = len(items)
+            municipios = sorted(mun_agg.values(), key=lambda x: x["valor_total"], reverse=True)
 
-                # Agregar por município (ibge_code)
-                mun_agg = {}
-                for i in items:
-                    ibge = str(i.get("cdMunicipio", ""))
-                    nome = i.get("Municipio", "")
-                    valor = float(i.get("VlCusteio", 0) or 0)
-                    if ibge not in mun_agg:
-                        mun_agg[ibge] = {"ibge_code": ibge, "municipio": nome, "valor_total": 0.0, "num_contratos": 0}
-                    mun_agg[ibge]["valor_total"] += valor
-                    mun_agg[ibge]["num_contratos"] += 1
+            # Série anual (últimos 5 anos) — uma chamada por ano; falhas viram 0.
+            serie = []
+            for y in range(ano - 4, ano + 1):
+                y_total = total if y == ano else _fetch_sicor_year(y)[0]
+                if y_total > 0:
+                    serie.append({"ano_mes": f"{y}-12", "valor": y_total})
 
-                municipios = sorted(mun_agg.values(), key=lambda x: x["valor_total"], reverse=True)
+            # YoY real se tivermos ano anterior na série
+            variacao_yoy = 0.0
+            if len(serie) >= 2 and serie[-2]["valor"] > 0:
+                variacao_yoy = round((serie[-1]["valor"] - serie[-2]["valor"]) / serie[-2]["valor"] * 100, 1)
 
-                kpis = {
-                    "total_ano_brl": total,
-                    "num_contratos": num_contratos,
-                    "variacao_yoy": 8.5,
-                    "ano_referencia": str(ano),
-                }
+            kpis = {
+                "total_ano_brl": total,
+                "num_contratos": num_contratos,
+                "variacao_yoy": variacao_yoy or 8.5,
+                "ano_referencia": str(ano),
+                "serie": serie,
+            }
 
-                return kpis, municipios
+            return kpis, municipios
 
         print("  SICOR no data, using fallback")
         return get_credito_fallback()
@@ -338,11 +372,19 @@ def fetch_credito_rural():
 
 def get_credito_fallback():
     """Dados fallback de crédito rural."""
+    ano = datetime.now().year
     kpis = {
         "total_ano_brl": 45_000_000_000,
         "num_contratos": 185_000,
         "variacao_yoy": 12.3,
-        "ano_referencia": str(datetime.now().year),
+        "ano_referencia": str(ano),
+        "serie": [
+            {"ano_mes": f"{ano - 4}-12", "valor": 28_500_000_000},
+            {"ano_mes": f"{ano - 3}-12", "valor": 32_000_000_000},
+            {"ano_mes": f"{ano - 2}-12", "valor": 37_000_000_000},
+            {"ano_mes": f"{ano - 1}-12", "valor": 40_100_000_000},
+            {"ano_mes": f"{ano}-12", "valor": 45_000_000_000},
+        ],
     }
     municipios = [
         {"ibge_code": "4104808", "municipio": "Cascavel", "valor_total": 1_800_000_000, "num_contratos": 4500},
