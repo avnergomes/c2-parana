@@ -29,6 +29,9 @@ const AlertasPage = lazy(() => import('@/pages/AlertasPage').then(m => ({ defaul
 const NotificationPrefsPage = lazy(() => import('@/pages/NotificationPrefsPage').then(m => ({ default: m.NotificationPrefsPage })))
 const RelatoriosPage = lazy(() => import('@/pages/RelatoriosPage').then(m => ({ default: m.RelatoriosPage })))
 const TendenciasPage = lazy(() => import('@/pages/TendenciasPage').then(m => ({ default: m.TendenciasPage })))
+const IncidentesPage = lazy(() => import('@/pages/IncidentesPage').then(m => ({ default: m.IncidentesPage })))
+const IncidentDetailPage = lazy(() => import('@/pages/IncidentDetailPage').then(m => ({ default: m.IncidentDetailPage })))
+const ComandoPage = lazy(() => import('@/pages/ComandoPage').then(m => ({ default: m.ComandoPage })))
 
 export function AppRouter() {
   return (
@@ -59,6 +62,9 @@ export function AppRouter() {
           <Route path="/alertas" element={<AlertasPage />} />
           <Route path="/relatorios" element={<RelatoriosPage />} />
           <Route path="/tendencias" element={<TendenciasPage />} />
+          <Route path="/incidentes" element={<IncidentesPage />} />
+          <Route path="/incidentes/:id" element={<IncidentDetailPage />} />
+          <Route path="/comando" element={<ComandoPage />} />
           <Route path="/configuracoes/notificacoes" element={<NotificationPrefsPage />} />
         </Route>
 
