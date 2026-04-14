@@ -95,7 +95,7 @@ def load_composite_rules() -> list[dict]:
     """Le regras compostas ativas de alert_rules."""
     rules = postgrest_get(
         "alert_rules",
-        select="id,name,description,severity,condition,cooldown_minutes",
+        select="id,name,description,severity,condition,cooldown_minutes,auto_create_incident",
         params={"domain": "eq.composto", "is_active": "eq.true"},
     )
     print(f"  {len(rules)} regras compostas ativas carregadas")
@@ -414,6 +414,88 @@ def _build_body(rule: dict, mun_name: str, ctx: dict) -> str:
     return f"Correlacao detectada em {mun_name}. {details}".strip()
 
 
+# --- Incident auto-creation -----------------------------------------------
+
+# Mapeia palavras-chave do nome da regra para incident_type
+_INCIDENT_TYPE_KEYWORDS = {
+    "incendio": "incendio",
+    "incêndio": "incendio",
+    "fogo": "incendio",
+    "enchente": "enchente",
+    "hidrico": "enchente",
+    "hídrico": "enchente",
+    "inundacao": "enchente",
+    "inundação": "enchente",
+    "dengue": "surto",
+    "sanitario": "surto",
+    "sanitário": "surto",
+    "epidem": "surto",
+    "calor": "onda_calor",
+    "seca": "seca",
+    "ar": "qualidade_ar",
+    "irtc": "outro",
+}
+
+
+def _infer_incident_type(rule_name: str) -> str:
+    """Infere o tipo de incidente a partir do nome da regra."""
+    name_lower = rule_name.lower()
+    for keyword, incident_type in _INCIDENT_TYPE_KEYWORDS.items():
+        if keyword in name_lower:
+            return incident_type
+    return "outro"
+
+
+def maybe_create_incident(
+    rule: dict, mun_name: str, ibge_code: str, ctx: dict,
+) -> bool:
+    """Cria incidente automaticamente se a regra tem auto_create_incident=true.
+
+    Usa ON CONFLICT DO NOTHING via partial unique index (idx_incidents_dedup)
+    para evitar duplicatas enquanto o incidente anterior do mesmo tipo+alerta
+    nao estiver resolvido/fechado.
+    """
+    if not rule.get("auto_create_incident"):
+        return False
+
+    incident_type = _infer_incident_type(rule["name"])
+    incident = {
+        "title": f"{rule['name']} — {mun_name}",
+        "description": _build_body(rule, mun_name, ctx),
+        "type": incident_type,
+        "severity": rule["severity"],
+        "source_alert_id": rule["id"],
+        "affected_municipalities": [{"ibge_code": ibge_code, "name": mun_name}],
+        "context": {
+            "climate": ctx.get("climate"),
+            "fire_count": ctx.get("fire_count", 0),
+            "river_level": ctx.get("river_level", "normal"),
+            "dengue_level": ctx.get("dengue_level", 0),
+            "irtc_score": ctx.get("irtc_score", 0),
+            "aqi": ctx.get("aqi"),
+            "detected_by": "etl_correlations",
+        },
+    }
+
+    # POST com header que ignora conflitos (dedup via partial unique index)
+    url = f"{SUPABASE_URL}/rest/v1/incidents?on_conflict=type,source_alert_id"
+    post_headers = {
+        **HEADERS,
+        "Prefer": "resolution=ignore-duplicates,return=minimal",
+    }
+    try:
+        resp = requests.post(url, headers=post_headers, json=incident, timeout=15)
+        if resp.status_code in (200, 201, 204):
+            return True
+        if resp.status_code == 409:
+            # Incidente duplicado (ja existe um aberto para este tipo+alerta)
+            return False
+        print(f"  WARN: POST incidents -> HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"  WARN: POST incidents falhou: {e}")
+    return False
+
+
 # --- Main -----------------------------------------------------------------
 
 def main() -> None:
@@ -455,6 +537,7 @@ def main() -> None:
     notifications_to_insert: list[dict] = []
     fired_count = 0
     cooldown_skip_count = 0
+    incidents_created = 0
 
     for ibge_code, mun_name in municipalities.items():
         ctx = {
@@ -476,12 +559,18 @@ def main() -> None:
                 continue
 
             fired_count += 1
+
+            # Auto-criacao de incidente (Fase 4.A)
+            if maybe_create_incident(rule, mun_name, ibge_code, ctx):
+                incidents_created += 1
+
             for uid in user_ids:
                 notifications_to_insert.append(
                     build_notification(rule, mun_name, ibge_code, uid, ctx)
                 )
 
     print(f"  {fired_count} disparos de regras, {cooldown_skip_count} pulados por cooldown")
+    print(f"  {incidents_created} incidentes criados automaticamente")
     print(f"  {len(notifications_to_insert)} notifications a inserir (com fan-out)")
 
     print("\n6/6 Inserindo notifications no Supabase...")
@@ -507,6 +596,7 @@ def main() -> None:
             "rules_fired": fired_count,
             "cooldown_skipped": cooldown_skip_count,
             "notifications_inserted": len(notifications_to_insert),
+            "incidents_created": incidents_created,
             "duration_seconds": round(duration, 2),
         },
         "source": "etl_correlations",
@@ -524,6 +614,7 @@ def main() -> None:
     print(f"Regras ativas:   {len(rules)}")
     print(f"Disparos:        {fired_count}")
     print(f"Cooldowns:       {cooldown_skip_count}")
+    print(f"Incidentes:      {incidents_created}")
     print(f"Notifications:   {len(notifications_to_insert)}")
     print("=" * 60)
 
