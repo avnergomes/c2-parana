@@ -11,6 +11,19 @@ import { formatCurrency, formatNumber } from '@/lib/utils'
 
 type Tab = 'precos' | 'vbp' | 'comex' | 'emprego' | 'credito'
 
+function formatMesReferencia(raw?: string): string {
+  if (!raw) return '—'
+  const m = /^(\d{4})(\d{2})$/.exec(raw)
+  if (m) return `${m[2]}/${m[1]}`
+  return raw
+}
+
+function EmptyChart({ message }: { message: string }) {
+  return (
+    <div className="card p-6 text-center text-text-secondary text-sm">{message}</div>
+  )
+}
+
 export function AgroPage() {
   const [activeTab, setActiveTab] = useState<Tab>('precos')
   const { isPro } = useAuth()
@@ -59,7 +72,7 @@ export function AgroPage() {
           <KpiCard
             label="Exportações"
             value={comex ? `US$ ${(comex.exportacoes_usd / 1e9).toFixed(1)} bi` : '—'}
-            subvalue={comex?.mes_referencia}
+            subvalue={`Ref. ${formatMesReferencia(comex?.mes_referencia)}`}
             trend={comex?.variacao_export_yoy}
             accentColor="blue"
             loading={loadingComex}
@@ -107,30 +120,44 @@ export function AgroPage() {
       <div className="min-h-[400px]">
         <ErrorBoundary moduleName={activeTab}>
           {activeTab === 'precos' && <PrecosDiariosTab />}
-          {activeTab === 'vbp' && vbp && (
+          {activeTab === 'vbp' && (vbp ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <KpiCard label="Lavoura" value={`R$ ${(vbp.vbp_lavoura_brl / 1e9).toFixed(1)} bi`} accentColor="green" />
               <KpiCard label="Pecuária" value={`R$ ${(vbp.vbp_pecuaria_brl / 1e9).toFixed(1)} bi`} accentColor="blue" />
             </div>
-          )}
-          {activeTab === 'emprego' && emprego?.serie && (
-            <SerieChart
-              data={emprego.serie
-                .filter(d => d.ano_mes && d.saldo !== undefined)
-                .map(d => ({ ano_mes: d.ano_mes!, value: d.saldo! }))}
-              label="Saldo de Empregos Agropecuários (CAGED)"
-              color="#10b981"
-              formatValue={v => (v >= 0 ? '+' : '') + formatNumber(v)}
-            />
-          )}
-          {activeTab === 'credito' && credito?.serie && (
-            <SerieChart
-              data={credito.serie.map(d => ({ ano_mes: d.ano_mes, value: d.valor / 1e6 }))}
-              label="Crédito Rural Paraná (R$ milhões)"
-              color="#8b5cf6"
-              formatValue={v => `${formatNumber(v, 0)}mi`}
-            />
-          )}
+          ) : (
+            <EmptyChart message="VBP indisponível. Execute o ETL Agro." />
+          ))}
+          {activeTab === 'emprego' && (() => {
+            const points = (emprego?.serie || [])
+              .filter(d => d.ano_mes && d.saldo !== undefined)
+              .map(d => ({ ano_mes: d.ano_mes!, value: d.saldo! }))
+            if (points.length === 0) {
+              return <EmptyChart message="Série de emprego indisponível. Execute o ETL Agro." />
+            }
+            return (
+              <SerieChart
+                data={points}
+                label="Saldo de Empregos Agropecuários (CEMPRE/IBGE)"
+                color="#10b981"
+                formatValue={v => (v >= 0 ? '+' : '') + formatNumber(v)}
+              />
+            )
+          })()}
+          {activeTab === 'credito' && (() => {
+            const points = (credito?.serie || []).map(d => ({ ano_mes: d.ano_mes, value: d.valor / 1e6 }))
+            if (points.length === 0) {
+              return <EmptyChart message="Série de crédito rural indisponível. Execute o ETL Agro." />
+            }
+            return (
+              <SerieChart
+                data={points}
+                label="Crédito Rural Paraná (R$ milhões)"
+                color="#8b5cf6"
+                formatValue={v => `${formatNumber(v, 0)}mi`}
+              />
+            )
+          })()}
           {activeTab === 'comex' && (
             <div className="space-y-4">
               {comex ? (
@@ -158,7 +185,7 @@ export function AgroPage() {
                     />
                   </div>
                   <p className="text-text-muted text-xs">
-                    Fonte: MDIC ComexStat · Ref: {comex.mes_referencia || '—'}
+                    Fonte: MDIC ComexStat · Ref: {formatMesReferencia(comex.mes_referencia)}
                   </p>
                 </>
               ) : (
