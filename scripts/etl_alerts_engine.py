@@ -412,6 +412,74 @@ def _build_notification_body(rule, matching_records):
     return "\n".join(lines)
 
 
+# ─── INCIDENT AUTO-CREATION (Fase 4.A) ──────────────────────────────
+
+_DOMAIN_TO_INCIDENT_TYPE = {
+    "clima": "onda_calor",
+    "saude": "surto",
+    "ambiente": "incendio",
+    "hidro": "enchente",
+    "ar": "qualidade_ar",
+    "composto": "outro",
+}
+
+
+def maybe_create_incident_from_rule(rule, matching_records):
+    """Cria incidente se a regra tem auto_create_incident=true.
+
+    Retorna True se incidente foi criado, False caso contrario.
+    """
+    if not rule.get("auto_create_incident"):
+        return False
+
+    domain = rule.get("domain", "")
+    incident_type = _DOMAIN_TO_INCIDENT_TYPE.get(domain, "outro")
+
+    # Extrair municipios afetados dos registros que dispararam
+    affected = []
+    for r in matching_records[:10]:
+        mun = (
+            r.get("municipality_name")
+            or r.get("municipality")
+            or r.get("city")
+            or r.get("station_name")
+            or "Desconhecido"
+        )
+        ibge = r.get("ibge_code", "")
+        affected.append({"ibge_code": ibge, "name": mun})
+
+    incident = {
+        "title": f"{rule['name']} ({len(matching_records)} registros)",
+        "description": rule.get("description", ""),
+        "type": incident_type,
+        "severity": rule["severity"],
+        "source_alert_id": rule["id"],
+        "affected_municipalities": affected,
+        "context": {
+            "matching_count": len(matching_records),
+            "condition": rule.get("condition"),
+            "domain": domain,
+            "detected_by": "etl_alerts_engine",
+        },
+    }
+
+    url = f"{REST_URL}/incidents?on_conflict=type,source_alert_id"
+    post_headers = {
+        **headers,
+        "Prefer": "resolution=ignore-duplicates,return=minimal",
+    }
+    try:
+        resp = requests.post(url, headers=post_headers, json=incident, timeout=15)
+        if resp.status_code in (200, 201, 204):
+            return True
+        if resp.status_code == 409:
+            return False
+        print(f"    WARN: POST incidents -> HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        print(f"    WARN: POST incidents falhou: {e}")
+    return False
+
+
 # ─── HEALTH TRACKING ────────────────────────────────────────────────
 
 def save_health(status, stats, errors, duration_seconds):
@@ -449,6 +517,7 @@ def main():
         "rules_evaluated": 0,
         "alerts_fired": 0,
         "notifications_created": 0,
+        "incidents_created": 0,
         "cooldown_skipped": 0,
         "condition_not_met": 0,
     }
@@ -530,6 +599,11 @@ def main():
                 print(f"    [{rule_name}] ERRO ao criar notificações: {e}")
                 errors.append(f"Notificação {rule_name}: {str(e)}")
 
+            # Auto-criacao de incidente (Fase 4.A)
+            if maybe_create_incident_from_rule(rule, matching):
+                stats["incidents_created"] += 1
+                print(f"    [{rule_name}] Incidente criado automaticamente")
+
     # 4. Health tracking
     print("\n3/3 Salvando health check...")
     duration = time.time() - start_time
@@ -546,6 +620,7 @@ def main():
     print(f"  Regras avaliadas: {stats['rules_evaluated']}")
     print(f"  Alertas disparados: {stats['alerts_fired']}")
     print(f"  Notificações criadas: {stats['notifications_created']}")
+    print(f"  Incidentes criados: {stats['incidents_created']}")
     print(f"  Cooldown (skip): {stats['cooldown_skipped']}")
     print(f"  Condição não atendida: {stats['condition_not_met']}")
     print(f"  Erros: {len(errors)}")
