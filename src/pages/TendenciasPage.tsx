@@ -11,6 +11,7 @@ import {
   useIRTCDistribuicao,
 } from '@/hooks/useTendencias'
 import { useAnomalias } from '@/hooks/useAnomalias'
+import { TimeRangeCompare } from '@/components/shared/TimeRangeCompare'
 
 const IRTC_COLORS: Record<string, string> = {
   baixo: '#10b981',
@@ -305,6 +306,53 @@ export function TendenciasPage() {
         <DengueChart />
         <IRTCGauge />
         <AnomaliasPanel />
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">
+          Comparação: últimos 30d vs período anterior
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <TimeRangeCompare
+            title="Temperatura média"
+            unit="°C"
+            table="climate_data"
+            metric="temperature"
+            dateField="observed_at"
+            daysPerWindow={30}
+            higherIsWorse={true}
+          />
+          <TimeRangeCompare
+            title="Umidade média"
+            unit="%"
+            table="climate_data"
+            metric="humidity"
+            dateField="observed_at"
+            daysPerWindow={30}
+            higherIsWorse={false}
+          />
+          <TimeRangeCompare
+            title="Focos de incêndio"
+            unit="focos"
+            table="fire_spots"
+            metric="brightness"
+            dateField="acq_date"
+            daysPerWindow={30}
+            aggregate="count"
+            higherIsWorse={true}
+            format={(v) => v.toFixed(0)}
+          />
+          <TimeRangeCompare
+            title="AQI médio"
+            unit="AQI"
+            table="air_quality"
+            metric="aqi"
+            dateField="observed_at"
+            daysPerWindow={30}
+            higherIsWorse={true}
+            format={(v) => v.toFixed(0)}
+          />
+        </div>
       </div>
     </div>
   )

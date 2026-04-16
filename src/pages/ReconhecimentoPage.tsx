@@ -8,6 +8,7 @@ import { useMunicipioMetadata, useAllMunicipios } from '@/hooks/useMunicipioMeta
 import { MunicipioHeader } from '@/components/reconhecimento/MunicipioHeader'
 import { MunicipioSituacao } from '@/components/reconhecimento/MunicipioSituacao'
 import { MunicipioRadar } from '@/components/reconhecimento/MunicipioRadar'
+import { TimeRangeCompare } from '@/components/shared/TimeRangeCompare'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
 export function ReconhecimentoPage() {
@@ -65,6 +66,46 @@ export function ReconhecimentoPage() {
         <ErrorBoundary moduleName="radar">
           <MunicipioRadar snapshot={snapshot} />
         </ErrorBoundary>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">
+          Evolução temporal (30d vs 30d anteriores)
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <TimeRangeCompare
+            title="Temperatura"
+            unit="°C"
+            table="climate_data"
+            metric="temperature"
+            dateField="observed_at"
+            daysPerWindow={30}
+            ibgeCode={validIbge}
+            higherIsWorse={true}
+          />
+          <TimeRangeCompare
+            title="Umidade"
+            unit="%"
+            table="climate_data"
+            metric="humidity"
+            dateField="observed_at"
+            daysPerWindow={30}
+            ibgeCode={validIbge}
+            higherIsWorse={false}
+          />
+          <TimeRangeCompare
+            title="Casos de dengue"
+            unit="casos"
+            table="dengue_data"
+            metric="cases"
+            dateField="last_update"
+            daysPerWindow={30}
+            ibgeCode={validIbge}
+            aggregate="sum"
+            higherIsWorse={true}
+            format={(v) => v.toFixed(0)}
+          />
+        </div>
       </section>
 
       <section>
