@@ -48,9 +48,11 @@ CREATE INDEX idx_cemaden_alerts_severity ON cemaden_alerts(severity);
 CREATE INDEX idx_cemaden_alerts_issued ON cemaden_alerts(issued_at DESC);
 CREATE INDEX idx_cemaden_alerts_ibge ON cemaden_alerts(ibge_code);
 CREATE INDEX idx_cemaden_alerts_type ON cemaden_alerts(alert_type);
-CREATE INDEX idx_cemaden_alerts_active
-  ON cemaden_alerts(severity, issued_at DESC)
-  WHERE expires_at IS NULL OR expires_at > now();
+-- Note: indice sem filtro WHERE expires_at > now() porque now() nao e IMMUTABLE
+-- no Postgres e predicados de indice parcial exigem funcoes IMMUTABLE. O filtro
+-- por alertas ativos e feito no hook via .or(`expires_at.is.null,expires_at.gt.${now}`).
+CREATE INDEX idx_cemaden_alerts_severity_issued
+  ON cemaden_alerts(severity, issued_at DESC);
 
 -- RLS: leitura anonima (dashboard publico)
 ALTER TABLE cemaden_alerts ENABLE ROW LEVEL SECURITY;
