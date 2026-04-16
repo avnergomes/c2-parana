@@ -189,10 +189,10 @@ def aggregate_sih(df: Any, competencia: date) -> list[dict[str, Any]]:
         print(f"  WARN colunas ausentes: {missing}")
         return []
 
-    # Enriquecer com capitulo CID
+    # Enriquecer com capitulo CID — nomes sem underscore inicial por causa
+    # do itertuples (pandas renomeia _x para _N posicional)
     df = df.copy()
-    df["_cid_chapter"] = df["DIAG_PRINC"].map(lambda c: cid_chapter_for(c)[0])
-    df["_cid_label"] = df["DIAG_PRINC"].map(lambda c: cid_chapter_for(c)[1])
+    df["cidChapter"] = df["DIAG_PRINC"].map(lambda c: cid_chapter_for(c)[0])
 
     # Normaliza ibge: SIH usa 6 dig (sem DV); convertemos para 7 dig com DV=0 fill
     def to_ibge7(code: Any) -> str | None:
@@ -201,34 +201,41 @@ def aggregate_sih(df: Any, competencia: date) -> list[dict[str, Any]]:
             return None
         return s + "0"
 
-    df["_ibge7"] = df["MUNIC_RES"].map(to_ibge7)
+    df["ibge7"] = df["MUNIC_RES"].map(to_ibge7)
 
-    # Valores numericos
     if "MORTE" in df.columns:
-        df["_obito"] = (df["MORTE"].astype(str) == "1").astype(int)
+        df["obito"] = (df["MORTE"].astype(str) == "1").astype(int)
     else:
-        df["_obito"] = 0
+        df["obito"] = 0
     if "VAL_TOT" not in df.columns:
         df["VAL_TOT"] = 0.0
     if "DIAS_PERM" not in df.columns:
         df["DIAS_PERM"] = 0
 
-    grouped = df.groupby(["_ibge7", "_cid_chapter"], dropna=False).agg(
-        internacoes=("_ibge7", "size"),
-        obitos=("_obito", "sum"),
+    grouped = df.groupby(["ibge7", "cidChapter"], dropna=False).agg(
+        internacoes=("ibge7", "size"),
+        obitos=("obito", "sum"),
         valor_total_reais=("VAL_TOT", "sum"),
         dias_permanencia=("DIAS_PERM", "sum"),
     ).reset_index()
 
     records: list[dict[str, Any]] = []
     for row in grouped.itertuples(index=False):
-        ibge = getattr(row, "_ibge7")
+        ibge = row.ibge7
         if not ibge:
             continue
-        cid_chapter = getattr(row, "_cid_chapter")
+        cid_chapter = row.cidChapter
         cid_label = None
-        if cid_chapter is not None:
-            cid_label = CID_CHAPTERS[int(cid_chapter)][2]
+        if cid_chapter is not None and not (
+            isinstance(cid_chapter, float) and cid_chapter != cid_chapter  # NaN check
+        ):
+            try:
+                cid_label = CID_CHAPTERS[int(cid_chapter)][2]
+            except (KeyError, ValueError):
+                cid_label = None
+                cid_chapter = None
+        else:
+            cid_chapter = None
         records.append({
             "ibge_code": ibge,
             "competencia": competencia.isoformat(),
@@ -236,8 +243,8 @@ def aggregate_sih(df: Any, competencia: date) -> list[dict[str, Any]]:
             "cid_chapter_label": cid_label,
             "internacoes": int(row.internacoes),
             "obitos": int(row.obitos),
-            "valor_total_reais": round(float(row.valor_total_reais), 2),
-            "dias_permanencia": int(row.dias_permanencia),
+            "valor_total_reais": round(float(row.valor_total_reais or 0), 2),
+            "dias_permanencia": int(row.dias_permanencia or 0),
         })
     return records
 
