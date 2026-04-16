@@ -1,8 +1,10 @@
 // src/pages/AmbientePage.tsx
 import { useFireSpots, useRiverLevels, useAirQuality } from '@/hooks/useAmbiente'
+import { useCemadenActiveCountBySeverity } from '@/hooks/useCemadenAlerts'
 import { QualidadeArCards } from '@/components/ambiente/QualidadeArCard'
 import { FireTrendChart } from '@/components/ambiente/FireTrendChart'
 import { RiosTable } from '@/components/ambiente/RiosTable'
+import { CemadenAlertsTable } from '@/components/ambiente/CemadenAlertsTable'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { PaywallModal } from '@/components/ui/PaywallModal'
@@ -14,6 +16,7 @@ export function AmbientePage() {
   const { data: fires, isLoading: loadingFires } = useFireSpots(7)
   const { data: rios } = useRiverLevels()
   const { data: aqData } = useAirQuality()
+  const { data: cemadenCounts } = useCemadenActiveCountBySeverity()
 
   if (!isPro) {
     return <div className="p-6"><PaywallModal feature="Meio Ambiente" requiredPlan="pro" onClose={() => history.back()} /></div>
@@ -23,19 +26,29 @@ export function AmbientePage() {
   const aqiMedio = aqData?.length
     ? Math.round(aqData.reduce((s, a) => s + (a.aqi || 0), 0) / aqData.length)
     : null
+  const cemadenAtivos =
+    (cemadenCounts?.alerta_maximo ?? 0) +
+    (cemadenCounts?.alerta ?? 0) +
+    (cemadenCounts?.atencao ?? 0)
+  const cemadenAccent: 'red' | 'yellow' | 'green' =
+    (cemadenCounts?.alerta_maximo ?? 0) > 0 || (cemadenCounts?.alerta ?? 0) > 0
+      ? 'red'
+      : (cemadenCounts?.atencao ?? 0) > 0
+        ? 'yellow'
+        : 'green'
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Meio Ambiente</h1>
-          <p className="text-text-secondary text-sm mt-1">NASA FIRMS · ANA Telemetria · AQICN</p>
+          <p className="text-text-secondary text-sm mt-1">NASA FIRMS · ANA Telemetria · AQICN · CEMADEN</p>
         </div>
         <LiveIndicator />
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <KpiCard
           label="Focos ativos (7d)"
           value={fires?.length ?? '—'}
@@ -51,6 +64,11 @@ export function AmbientePage() {
           label="AQI médio PR"
           value={aqiMedio ?? '—'}
           accentColor={aqiMedio && aqiMedio > 100 ? 'red' : aqiMedio && aqiMedio > 50 ? 'yellow' : 'green'}
+        />
+        <KpiCard
+          label="CEMADEN ativos (24h)"
+          value={cemadenAtivos}
+          accentColor={cemadenAccent}
         />
         <KpiCard
           label="Cobertura monitoramento"
@@ -74,6 +92,16 @@ export function AmbientePage() {
         </ErrorBoundary>
         <ErrorBoundary moduleName="rios">
           <RiosTable />
+        </ErrorBoundary>
+      </div>
+
+      {/* Alertas CEMADEN */}
+      <div>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">
+          Alertas Oficiais da Defesa Civil
+        </h2>
+        <ErrorBoundary moduleName="cemaden">
+          <CemadenAlertsTable />
         </ErrorBoundary>
       </div>
     </div>

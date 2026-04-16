@@ -1,0 +1,36 @@
+# .github/workflows/cron-cemaden.yml
+# Fase 5.A — CEMADEN alertas geo/hidrologicos
+# Budget: ~2 min/dia (48 exec x ~2s) — maior frequencia porque o dado e critico
+name: ETL CEMADEN (alertas geo/hidrologicos)
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # a cada 30 min
+  workflow_dispatch:
+
+concurrency:
+  group: etl-cemaden
+  cancel-in-progress: true
+
+jobs:
+  etl-cemaden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: pip install -r scripts/requirements.txt
+
+      - name: Executar ETL CEMADEN
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CEMADEN_UF: PR
+        run: python scripts/etl_cemaden.py
