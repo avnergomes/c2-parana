@@ -79,7 +79,7 @@ export function useReconhecimento(ibge: string | null | undefined) {
             .select(
               'ibge_code, municipality, irtc_score, risk_level, risk_clima, ' +
                 'risk_saude, risk_ambiente, risk_hidro, risk_ar, data_coverage, ' +
-                'dominant_domain, updated_at'
+                'dominant_domain, calculated_at'
             )
             .eq('ibge_code', ibge)
             .limit(1)
@@ -97,7 +97,7 @@ export function useReconhecimento(ibge: string | null | undefined) {
             rAr: (row.risk_ar as number | null) ?? null,
             coverage: (row.data_coverage as number | null) ?? null,
             dominantDomain: (row.dominant_domain as string | null) ?? null,
-            updatedAt: (row.updated_at as string | null) ?? null,
+            updatedAt: (row.calculated_at as string | null) ?? null,
           }
         },
       },
