@@ -22,8 +22,11 @@ interface GeojsonProps {
 
 async function loadLookup(): Promise<Map<string, MunicipioMetadata>> {
   if (lookupCache) return lookupCache
-  const resp = await fetch('/data/municipios-pr.geojson')
-  if (!resp.ok) throw new Error('Falha ao carregar geojson de municipios')
+  // Respeita o base path do Vite (/c2-parana/ em prod, / em dev)
+  const baseUrl = import.meta.env.BASE_URL || '/'
+  const geojsonUrl = `${baseUrl.replace(/\/$/, '')}/data/municipios-pr.geojson`
+  const resp = await fetch(geojsonUrl)
+  if (!resp.ok) throw new Error(`Falha ao carregar geojson: ${geojsonUrl} (HTTP ${resp.status})`)
   const geojson = (await resp.json()) as {
     features: Array<{ properties?: GeojsonProps }>
   }
