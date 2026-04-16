@@ -135,7 +135,11 @@ def try_import_pysus() -> Any:
 
 
 def fetch_sih_data(state: str, month: date, SIH: Any) -> Any | None:
-    """Baixa o arquivo RD<UF><AAMM>.dbc e retorna DataFrame pandas."""
+    """Baixa o arquivo RD<UF><AAMM>.dbc e retorna DataFrame pandas.
+
+    sih.download() devolve ParquetSet ou List[ParquetSet], cada um
+    com .to_dataframe() que concatena todos os parquets do diretorio.
+    """
     try:
         sih = SIH().load()  # noqa: N806
         files = sih.get_files(
@@ -148,13 +152,16 @@ def fetch_sih_data(state: str, month: date, SIH: Any) -> Any | None:
             print(f"  sem arquivo RD{state}{month.strftime('%y%m')} no FTP")
             return None
         print(f"  baixando {files[0].name}...")
-        parquet_dir = sih.download(files)
-        # parquet_dir e lista de caminhos para parquets temporarios
+        result = sih.download(files)
+
         import pandas as pd  # type: ignore
 
-        dfs = []
-        for path in parquet_dir:
-            dfs.append(pd.read_parquet(path))
+        if result is None:
+            return None
+        if isinstance(result, list):
+            dfs = [p.to_dataframe() for p in result if p is not None]
+        else:
+            dfs = [result.to_dataframe()]
         if not dfs:
             return None
         return pd.concat(dfs, ignore_index=True)
