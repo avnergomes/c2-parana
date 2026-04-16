@@ -32,6 +32,7 @@ const TendenciasPage = lazy(() => import('@/pages/TendenciasPage').then(m => ({ 
 const IncidentesPage = lazy(() => import('@/pages/IncidentesPage').then(m => ({ default: m.IncidentesPage })))
 const IncidentDetailPage = lazy(() => import('@/pages/IncidentDetailPage').then(m => ({ default: m.IncidentDetailPage })))
 const ComandoPage = lazy(() => import('@/pages/ComandoPage').then(m => ({ default: m.ComandoPage })))
+const ReconhecimentoPage = lazy(() => import('@/pages/ReconhecimentoPage').then(m => ({ default: m.ReconhecimentoPage })))
 
 export function AppRouter() {
   return (
@@ -65,6 +66,8 @@ export function AppRouter() {
           <Route path="/incidentes" element={<IncidentesPage />} />
           <Route path="/incidentes/:id" element={<IncidentDetailPage />} />
           <Route path="/comando" element={<ComandoPage />} />
+          <Route path="/reconhecimento" element={<ReconhecimentoPage />} />
+          <Route path="/reconhecimento/:ibge" element={<ReconhecimentoPage />} />
           <Route path="/configuracoes/notificacoes" element={<NotificationPrefsPage />} />
         </Route>
 
