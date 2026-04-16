@@ -203,13 +203,22 @@ def aggregate_sih(df: Any, competencia: date) -> list[dict[str, Any]]:
 
     df["ibge7"] = df["MUNIC_RES"].map(to_ibge7)
 
+    import pandas as pd  # type: ignore
+
     if "MORTE" in df.columns:
-        df["obito"] = (df["MORTE"].astype(str) == "1").astype(int)
+        df["obito"] = (df["MORTE"].astype(str).str.strip() == "1").astype(int)
     else:
         df["obito"] = 0
-    if "VAL_TOT" not in df.columns:
+
+    # DBF entrega numericos como strings com padding; coerce garante
+    # que o .sum() vire soma e nao concat de strings.
+    if "VAL_TOT" in df.columns:
+        df["VAL_TOT"] = pd.to_numeric(df["VAL_TOT"], errors="coerce").fillna(0.0)
+    else:
         df["VAL_TOT"] = 0.0
-    if "DIAS_PERM" not in df.columns:
+    if "DIAS_PERM" in df.columns:
+        df["DIAS_PERM"] = pd.to_numeric(df["DIAS_PERM"], errors="coerce").fillna(0).astype(int)
+    else:
         df["DIAS_PERM"] = 0
 
     grouped = df.groupby(["ibge7", "cidChapter"], dropna=False).agg(
