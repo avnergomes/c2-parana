@@ -1,6 +1,7 @@
 -r requirements.txt
 # Fase 5.F — DataSUS SIH (so instalado no cron-datasus).
-# pysus traz pyreaddbc com wheels pre-compilados para linux_x86_64.
-pysus==0.17.5
-pandas==2.2.3
-pyarrow==16.1.0
+# pysus 0.15.0 e a ultima versao pre-1.0 com o layout pysus.ftp.databases.sih.
+# Requer Python 3.10-3.12. pyreaddbc traz wheels pre-compilados linux_x86_64.
+pysus==0.15.0
+pandas>=2.0,<2.3
+pyarrow>=11.0
