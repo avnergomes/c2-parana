@@ -4,6 +4,7 @@ import { DengueMapaCoro } from '@/components/saude/DengueMapaCoro'
 import { AlertasMunicipios } from '@/components/saude/AlertasMunicipios'
 import { DengueSerieTemporal } from '@/components/saude/DengueSerieTemporal'
 import { DengueProjecoes } from '@/components/saude/DengueProjecoes'
+import { InternacoesSUS } from '@/components/saude/InternacoesSUS'
 import { KpiCard } from '@/components/ui/KpiCard'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { PaywallModal } from '@/components/ui/PaywallModal'
@@ -78,6 +79,14 @@ export function SaudePage() {
         <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Projecoes (+4 semanas)</h2>
         <ErrorBoundary moduleName="projecoes dengue">
           <DengueProjecoes />
+        </ErrorBoundary>
+      </div>
+
+      {/* Internacoes SUS (DataSUS SIH) */}
+      <div>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Morbidade Hospitalar SUS</h2>
+        <ErrorBoundary moduleName="datasus sih">
+          <InternacoesSUS />
         </ErrorBoundary>
       </div>
 

@@ -1,8 +1,8 @@
 # Plano de Implementação — Fase 5 (Reconhecimento e Sensores Avançados)
 
-**Versão:** 1.0
-**Data:** 2026-04-16
-**Status:** 🟡 Em execução (iniciada hoje)
+**Versão:** 1.1
+**Data:** 2026-04-16 (atualizado após sessão autopilot)
+**Status:** ✅ **5.A, 5.D, 5.E, 5.F shipadas (infraestrutura)** | 5.B, 5.C adiadas | 5.G, 5.H opcionais
 **Predecessor:** `PLANO_FASE4.md` (7/7 sub-fases completas)
 
 ---
@@ -310,9 +310,31 @@ Motivo do adiamento: ver seção 3.2. Acoplada a 5.B.
 
 ---
 
-### Fase 5.F — DataSUS TabNet ampliado
+### Fase 5.F — DataSUS SIH ampliado 🟢 Infraestrutura pronta (2026-04-16)
 
-**Objetivo:** Expandir dados de saúde além do InfoDengue — internações (SIH) e
+**Status:** Schema + ETL + cron shipados. Aguarda primeiro run mensal (dia 5)
+para validar em produção.
+
+**Implementado:**
+- Migration 028: tabelas `datasus_sih` (dados agregados por município x capítulo CID)
+  e `datasus_sih_ingestion_log` (controle idempotência por competência)
+- `scripts/etl_datasus.py` usa pysus 0.17.5 (pyreaddbc wheels) para ler RDPR mensal
+  do FTP, agrega por capítulo CID-10, upsert. Suporta `--month` e `--last-n-months`
+  para backfill manual via workflow_dispatch
+- `scripts/requirements-datasus.txt` separado: pysus + pandas + pyarrow só são
+  instalados no cron-datasus, não contaminando os outros crons
+- Cron mensal dia 5 às 02:00 UTC
+- Hook `useDatasusSih` + componente `InternacoesSUS` com chart Recharts e
+  seletor de capítulo CID (Respiratório, Circulatório, Infecciosas, etc.)
+- Integrado em SaudePage e ReconhecimentoPage (com filtro por IBGE)
+
+**Dependência validada:** pysus traz wheels pré-compilados para linux_x86_64,
+deve instalar limpo no runner GH Actions. Se falhar, o ETL emite mensagem clara
+orientando troca por dbfread+readdbc alternativo.
+
+**Escopo original (mantido como referência):**
+
+Expandir dados de saúde além do InfoDengue — internações (SIH) e
 mortalidade (SIM) por município e grupo CID.
 
 **Escopo:**
@@ -375,19 +397,18 @@ ambientalmente. Adiada para depois de 5.F.
 
 ## 5. Ordem de execução recomendada
 
-1. **5.A — CEMADEN** (iniciando) — ganho imediato: nova fonte crítica, integra
-   direto com ciclo OODA da Fase 4
-2. **5.D — Reconhecimento por Município** (segunda prioridade) — fecha a "última milha"
-   do operador: da visão macro no /comando ao drill-down por município
-3. **5.E — Análise temporal** — componente pequeno mas alavanca valor em 2 páginas
-   existentes
-4. **5.F — DataSUS SIH** — expande /saude com dado novo (internações ≠ casos)
+1. ~~**5.A — CEMADEN**~~ ✅ shipada 2026-04-16 — feed wsAlertas2, integração OODA
+2. ~~**5.D — Reconhecimento por Município**~~ ✅ shipada 2026-04-16 — `/reconhecimento/:ibge` + radar comparativo
+3. ~~**5.E — Análise temporal antes/depois**~~ ✅ shipada 2026-04-16 — `TimeRangeCompare` em /tendencias e /reconhecimento
+4. ~~**5.F — DataSUS SIH**~~ 🟢 infraestrutura shipada 2026-04-16 — cron mensal, aguarda primeiro run dia 5/maio
 5. **5.B — Sentinel** — bloqueada por decisão de orçamento
 6. **5.C — GEE** — acoplada a 5.B
 7. **5.G — DENATRAN** — opcional, baixa prioridade
 8. **5.H — SICAR** — opcional, prioridade média
 
-**Plano para hoje (sessão 2026-04-16):** shipar 5.A completa em produção, começar 5.D.
+**Sessão autopilot 2026-04-16:** 4 sub-fases shipadas em sequência com type-check
+verde e dry-runs validados. Commits: dea83f5 (5.A), 29809f6 (5.D), f9177d7 (5.E),
+pendente (5.F).
 
 ---
 

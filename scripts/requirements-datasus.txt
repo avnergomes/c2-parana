@@ -1,0 +1,6 @@
+-r requirements.txt
+# Fase 5.F — DataSUS SIH (so instalado no cron-datasus).
+# pysus traz pyreaddbc com wheels pre-compilados para linux_x86_64.
+pysus==0.17.5
+pandas==2.2.3
+pyarrow==16.1.0

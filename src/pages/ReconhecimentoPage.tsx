@@ -9,6 +9,7 @@ import { MunicipioHeader } from '@/components/reconhecimento/MunicipioHeader'
 import { MunicipioSituacao } from '@/components/reconhecimento/MunicipioSituacao'
 import { MunicipioRadar } from '@/components/reconhecimento/MunicipioRadar'
 import { TimeRangeCompare } from '@/components/shared/TimeRangeCompare'
+import { InternacoesSUS } from '@/components/saude/InternacoesSUS'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 
 export function ReconhecimentoPage() {
@@ -106,6 +107,15 @@ export function ReconhecimentoPage() {
             format={(v) => v.toFixed(0)}
           />
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">
+          Morbidade hospitalar (DataSUS SIH)
+        </h2>
+        <ErrorBoundary moduleName="datasus sih">
+          <InternacoesSUS ibge={validIbge} />
+        </ErrorBoundary>
       </section>
 
       <section>
