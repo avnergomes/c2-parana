@@ -27,14 +27,32 @@ CIDADES_AR = [
     {"id": "londrina", "slug": "londrina"},
     {"id": "maringa", "slug": "maringá"},
     {"id": "foz", "slug": "foz-do-iguaçu"},
+    {"id": "cascavel", "slug": "cascavel"},
+    {"id": "ponta-grossa", "slug": "ponta-grossa"},
+    {"id": "sao-jose-dos-pinhais", "slug": "são-josé-dos-pinhais"},
+    {"id": "guarapuava", "slug": "guarapuava"},
+    {"id": "umuarama", "slug": "umuarama"},
+    {"id": "toledo", "slug": "toledo"},
+    {"id": "paranagua", "slug": "paranaguá"},
+    {"id": "apucarana", "slug": "apucarana"},
 ]
 
-# Fallback: WAQI station IDs by geo coordinates (lat, lon)
+# Fallback: WAQI station IDs by geo coordinates (lat, lon).
+# O AQICN tambem expoe /feed/geo:LAT;LON — quando o slug-based nao encontra
+# estacao, o fallback tenta achar uma estacao dentro de ~100km da cidade.
 CIDADES_AR_GEO = {
     "curitiba": {"lat": -25.43, "lon": -49.27},
     "londrina": {"lat": -23.31, "lon": -51.16},
     "maringa": {"lat": -23.42, "lon": -51.94},
     "foz": {"lat": -25.52, "lon": -54.59},
+    "cascavel": {"lat": -24.9545, "lon": -53.4596},
+    "ponta-grossa": {"lat": -25.0959, "lon": -50.1647},
+    "sao-jose-dos-pinhais": {"lat": -25.5307, "lon": -49.2000},
+    "guarapuava": {"lat": -25.3890, "lon": -51.4638},
+    "umuarama": {"lat": -23.7652, "lon": -53.3248},
+    "toledo": {"lat": -24.7257, "lon": -53.7406},
+    "paranagua": {"lat": -25.5169, "lon": -48.7296},
+    "apucarana": {"lat": -23.5707, "lon": -51.4635},
 }
 
 # Município centroides para mapeamento de focos de incêndio por proximidade

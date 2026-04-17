@@ -112,23 +112,61 @@ def load_municipalities_from_geojson():
 # ─── FETCH DATA ───────────────────────────────────────────────────────
 
 def fetch_climate_data():
-    """Busca dados climáticos recentes (últimas 6h) por município."""
-    records = postgrest_get(
+    """Busca dados climaticos: valor mais recente + precipitacao acumulada 72h.
+
+    Duas passagens na mesma tabela:
+      1. Latest: ultimo temperature/humidity por municipio (para thresholds
+         instantaneos de 35/40 C e 30 por cento umidade)
+      2. Rolling 72h: soma de precipitation (mm/h) para detectar
+         acumulados > 50mm (risco hidro) e > 100mm (risco alto de enchente)
+    """
+    # 1. Latest por municipio
+    latest_records = postgrest_get(
         "climate_data",
-        select="municipality,ibge_code,temperature,humidity,observed_at",
+        select="ibge_code,temperature,humidity,observed_at",
         params={"order": "observed_at.desc", "limit": "500"},
     )
-    # Agrupar por município (pegar o mais recente)
-    by_municipality = {}
-    for rec in records:
+    by_municipality: dict[str, dict] = {}
+    for rec in latest_records:
         ibge = rec.get("ibge_code")
         if not ibge or ibge in by_municipality:
             continue
         by_municipality[ibge] = {
             "temperature": rec.get("temperature"),
             "humidity": rec.get("humidity"),
+            "precipitation_72h": 0.0,
         }
-    print(f"  Clima: {len(by_municipality)} municípios com dados")
+
+    # 2. Precipitacao acumulada 72h por ibge
+    cutoff_72h = (datetime.now() - timedelta(hours=72)).isoformat()
+    precip_records = postgrest_get(
+        "climate_data",
+        select="ibge_code,precipitation,observed_at",
+        params={
+            "observed_at": f"gte.{cutoff_72h}",
+            "precipitation": "not.is.null",
+            "limit": "5000",
+        },
+    )
+    precip_sum: dict[str, float] = defaultdict(float)
+    for rec in precip_records:
+        ibge = rec.get("ibge_code")
+        p = rec.get("precipitation")
+        if ibge and isinstance(p, (int, float)):
+            precip_sum[ibge] += float(p)
+
+    for ibge, total in precip_sum.items():
+        if ibge not in by_municipality:
+            by_municipality[ibge] = {
+                "temperature": None, "humidity": None, "precipitation_72h": 0.0,
+            }
+        by_municipality[ibge]["precipitation_72h"] = round(total, 1)
+
+    precip_nonzero = sum(1 for v in by_municipality.values() if v["precipitation_72h"] > 0)
+    print(
+        f"  Clima: {len(by_municipality)} municipios com dados "
+        f"(precip 72h > 0 em {precip_nonzero})"
+    )
     return by_municipality
 
 
@@ -153,20 +191,26 @@ def fetch_dengue_data():
 
 
 def fetch_fire_spots():
-    """Busca focos de incêndio dos últimos 7 dias agrupados por município."""
-    cutoff = (datetime.now() - timedelta(days=7)).date().isoformat()
+    """Busca focos de incêndio dos últimos 30 dias agrupados por município.
+
+    Janela 30d (vs 7d anterior) porque fora do periodo de seca (set-mar)
+    os focos sao esparsos e a janela curta mantinha todos os munis em zero.
+    Em abril tipicamente ha ~10 focos em 7d no PR inteiro vs ~50-80 em 30d —
+    isso permite que munis com queimada isolada apareçam como risco baixo
+    em vez de serem diluidos.
+    """
+    cutoff = (datetime.now() - timedelta(days=30)).date().isoformat()
     records = postgrest_get(
         "fire_spots",
         select="municipality,acq_date",
-        params={"acq_date": f"gte.{cutoff}"},
+        params={"acq_date": f"gte.{cutoff}", "limit": "5000"},
     )
-    # Contar focos por município (text match)
     counts = defaultdict(int)
     for rec in records:
         mun = rec.get("municipality")
         if mun:
             counts[mun] += 1
-    print(f"  Focos: {sum(counts.values())} focos em {len(counts)} municípios (últimos 7 dias)")
+    print(f"  Focos: {sum(counts.values())} focos em {len(counts)} municipios (ultimos 30 dias)")
     return counts
 
 
@@ -187,8 +231,54 @@ def fetch_river_levels():
         existing = by_municipality.get(mun, "normal")
         if alert_priority.get(level, 0) > alert_priority.get(existing, 0):
             by_municipality[mun] = level
-    print(f"  Rios: {len(by_municipality)} municípios com dados")
+    print(f"  Rios: {len(by_municipality)} municipios com dados")
     return by_municipality
+
+
+def fetch_cemaden_hydro_scores():
+    """Busca alertas CEMADEN ativos com dominio hidrologico por ibge_code.
+
+    CEMADEN cobre 26+ cidades do PR vs 8 estacoes da ANA — complemento
+    importante para risk_hidro. Apenas alertas ainda nao expirados e dos
+    ultimos 3 dias sao considerados ativos.
+
+    Mapping severidade -> score:
+      observacao     -> 25
+      atencao        -> 50
+      alerta         -> 75
+      alerta_maximo  -> 100
+
+    Retorna dict {ibge_code: score_max} (pega o mais severo quando ha mais
+    de um alerta ativo pro mesmo muni).
+    """
+    cutoff = (datetime.now() - timedelta(days=3)).isoformat()
+    now_iso = datetime.now().isoformat()
+    records = postgrest_get(
+        "cemaden_alerts",
+        select="ibge_code,alert_type,severity,expires_at,issued_at",
+        params={
+            "issued_at": f"gte.{cutoff}",
+            "alert_type": "in.(hidrologico,alagamento,inundacao,enxurrada,movimento_massa)",
+            "or": f"(expires_at.is.null,expires_at.gt.{now_iso})",
+            "limit": "1000",
+        },
+    )
+    severity_map = {
+        "observacao": 25,
+        "atencao": 50,
+        "alerta": 75,
+        "alerta_maximo": 100,
+    }
+    by_ibge: dict[str, int] = {}
+    for rec in records:
+        ibge = rec.get("ibge_code")
+        if not ibge:
+            continue
+        score = severity_map.get(rec.get("severity") or "", 0)
+        if score > by_ibge.get(ibge, 0):
+            by_ibge[ibge] = score
+    print(f"  CEMADEN hidro: {len(by_ibge)} municipios com alerta ativo")
+    return by_ibge
 
 
 def fetch_air_quality():
@@ -209,12 +299,18 @@ def fetch_air_quality():
 
 # ─── RISK CALCULATIONS (0-100) ───────────────────────────────────────
 
-def calc_r_clima(temperature, humidity):
-    """Calcula risco climático (0-100).
-    Temperatura >35°C → 50, >40°C → 100; Umidade <30% → 50; else 0.
-    Média se ambos presentes.
+def calc_r_clima(temperature, humidity, precipitation_72h=0.0):
+    """Calcula risco climatico (0-100).
 
-    Returns (score, has_data): has_data is True if at least one reading exists.
+    Fontes (INMET + Open-Meteo):
+      temperatura:     > 35C -> 50,  > 40C -> 100
+      umidade:         < 30% -> 50
+      precip 72h:      > 20mm -> 25,  > 50mm -> 60,  > 100mm -> 100
+
+    Media dos sub-scores disponiveis.
+
+    Returns (score, has_data): has_data is True if at least one of
+    temperature, humidity, or positive precipitation was observed.
     """
     scores = []
     if temperature is not None:
@@ -227,6 +323,15 @@ def calc_r_clima(temperature, humidity):
     if humidity is not None:
         if humidity < 30:
             scores.append(50)
+        else:
+            scores.append(0)
+    if precipitation_72h is not None and precipitation_72h > 0:
+        if precipitation_72h > 100:
+            scores.append(100)
+        elif precipitation_72h > 50:
+            scores.append(60)
+        elif precipitation_72h > 20:
+            scores.append(25)
         else:
             scores.append(0)
     if not scores:
@@ -254,20 +359,28 @@ def calc_r_saude(alert_level):
 
 
 def calc_r_ambiente(fire_count):
-    """Calcula risco ambiental (0-100) baseado em focos de incêndio.
-    0→0, 1-5→25, 6-20→50, >20→100
+    """Calcula risco ambiental (0-100) baseado em focos de incendio em 30d.
+
+    Com janela 30d (vs 7d), os thresholds foram recalibrados pra refletir
+    o novo volume base:
+      0 focos       -> 0   (sem evidencia)
+      1-3 focos     -> 15  (atividade isolada, baixo risco)
+      4-15 focos    -> 40  (atividade persistente)
+      16-50 focos   -> 70  (foco quente)
+      >50 focos     -> 100 (area critica — provavel queimada extensa)
 
     Returns (score, has_data): has_data is always True for ambiente because
     FIRMS satellite coverage is global — zero fires IS a valid reading
-    ("no fires detected"), not missing data. Unlike weather stations or
-    river gauges, absence of FIRMS events means actual absence of fire.
+    ("no fires detected"), not missing data.
     """
     if fire_count <= 0:
         return (0, True)
-    if fire_count <= 5:
-        return (25, True)
-    if fire_count <= 20:
-        return (50, True)
+    if fire_count <= 3:
+        return (15, True)
+    if fire_count <= 15:
+        return (40, True)
+    if fire_count <= 50:
+        return (70, True)
     return (100, True)
 
 
@@ -366,6 +479,14 @@ CITY_TO_IBGE = {
     "londrina": "4113700",
     "maringa": "4115200",
     "foz": "4108304",
+    "cascavel": "4104808",
+    "ponta-grossa": "4119905",
+    "sao-jose-dos-pinhais": "4125506",
+    "guarapuava": "4109401",
+    "umuarama": "4128104",
+    "toledo": "4127700",
+    "paranagua": "4118204",
+    "apucarana": "4101408",
 }
 
 
@@ -412,13 +533,18 @@ def main():
         fire_data = defaultdict(int)
         errors.append(f"fire_spots: {e}")
 
-    print("\n5/6 Buscando níveis de rios...")
+    print("\n5/6 Buscando niveis de rios + CEMADEN hidro...")
     try:
         river_data = fetch_river_levels()
     except Exception as e:
         print(f"  ERRO rios: {e}")
         river_data = {}
         errors.append(f"river_levels: {e}")
+    try:
+        cemaden_hydro = fetch_cemaden_hydro_scores()
+    except Exception as e:
+        print(f"  WARN cemaden hidro: {e}")
+        cemaden_hydro = {}
 
     print("\n6/6 Buscando qualidade do ar...")
     try:
@@ -436,9 +562,13 @@ def main():
     risk_distribution = defaultdict(int)
 
     for ibge_code, mun_name in municipalities.items():
-        # R_clima: buscar por ibge_code
+        # R_clima: buscar por ibge_code (inclui precipitacao 72h acumulada)
         clima = climate_data.get(ibge_code, {})
-        r_clima, r_clima_has = calc_r_clima(clima.get("temperature"), clima.get("humidity"))
+        r_clima, r_clima_has = calc_r_clima(
+            clima.get("temperature"),
+            clima.get("humidity"),
+            clima.get("precipitation_72h", 0.0),
+        )
 
         # R_saude: buscar por ibge_code
         saude = dengue_data.get(ibge_code, {})
@@ -454,7 +584,9 @@ def main():
                     break
         r_ambiente, r_ambiente_has = calc_r_ambiente(fire_count)
 
-        # R_hidro: buscar por nome do município, tracking se existe estação
+        # R_hidro: combina ANA (rios) + CEMADEN (alertas hidrologicos).
+        # Pega o maior score entre as duas fontes. CEMADEN cobre muito mais
+        # municipios (~26 vs 8 da ANA) e inclui alagamento/enxurrada/inundacao.
         river_alert = river_data.get(mun_name)
         has_station = river_alert is not None
         if not has_station:
@@ -464,7 +596,13 @@ def main():
                     river_alert = alert
                     has_station = True
                     break
-        r_hidro, r_hidro_has = calc_r_hidro(river_alert or "normal", has_station=has_station)
+        r_hidro_ana, _ = calc_r_hidro(river_alert or "normal", has_station=has_station)
+
+        cemaden_score = cemaden_hydro.get(ibge_code, 0)
+        cemaden_has = cemaden_score > 0
+
+        r_hidro = max(r_hidro_ana, cemaden_score)
+        r_hidro_has = has_station or cemaden_has
 
         # R_ar: buscar por cidade (mapeamento AQICN)
         r_ar, r_ar_has = 0, False
