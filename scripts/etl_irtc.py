@@ -215,23 +215,34 @@ def fetch_fire_spots():
 
 
 def fetch_river_levels():
-    """Busca níveis de rios por estação, mapeando para municípios."""
+    """Busca niveis de rios por estacao, mapeando para municipios.
+
+    Bug latente corrigido em 2026-04-17: o default 'existing' era 'normal'
+    (prio 0) e a comparacao strict > fazia com que nenhum muni com rio em
+    'normal' fosse inserido no dict. Resultado: has_station ficava False
+    para todos os munis com estacao em nivel normal, erradamente marcando
+    o dominio hidro como 'sem dados' em vez de 'sem alerta'.
+
+    Fix: insere sempre na primeira ocorrencia; so atualiza se novo nivel
+    for pior que o ja registrado.
+    """
     records = postgrest_get(
         "river_levels",
         select="station_code,municipality,alert_level",
     )
-    # Agrupar por município (pegar pior alerta)
     alert_priority = {"normal": 0, "attention": 1, "alert": 2, "emergency": 3}
-    by_municipality = {}
+    by_municipality: dict[str, str] = {}
     for rec in records:
         mun = rec.get("municipality")
         if not mun:
             continue
-        level = rec.get("alert_level", "normal")
-        existing = by_municipality.get(mun, "normal")
-        if alert_priority.get(level, 0) > alert_priority.get(existing, 0):
+        level = rec.get("alert_level") or "normal"
+        existing = by_municipality.get(mun)
+        if existing is None:
             by_municipality[mun] = level
-    print(f"  Rios: {len(by_municipality)} municipios com dados")
+        elif alert_priority.get(level, 0) > alert_priority.get(existing, 0):
+            by_municipality[mun] = level
+    print(f"  Rios: {len(by_municipality)} municipios com estacao")
     return by_municipality
 
 

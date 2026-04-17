@@ -81,7 +81,7 @@ MUNICIPIOS_PR_CENTROIDES = {
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """Calcula distância em km entre dois pontos lat/lon."""
+    """Calcula distancia em km entre dois pontos lat/lon."""
     from math import radians, cos, sin, asin, sqrt
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
@@ -92,15 +92,79 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return c * r
 
 
-def find_nearest_municipality(lat, lon, max_distance_km=50):
-    """Encontra o município mais próximo para um foco de incêndio."""
+_CENTROIDS_CACHE: list[tuple[str, float, float]] | None = None
+
+
+def _load_all_centroids() -> list[tuple[str, float, float]]:
+    """Carrega centroides de TODOS os 399 municipios do PR do geojson.
+
+    Calcula o centroide como media aritmetica das coordenadas do anel
+    externo do poligono. Precisao suficiente para matching de focos
+    FIRMS por proximidade (tipicamente < 50km do centro do muni).
+
+    Fallback para o dict hardcoded MUNICIPIOS_PR_CENTROIDES se o
+    geojson nao estiver acessivel.
+    """
+    global _CENTROIDS_CACHE
+    if _CENTROIDS_CACHE is not None:
+        return _CENTROIDS_CACHE
+
+    geojson_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "public", "data", "municipios-pr.geojson",
+    )
+    centroids: list[tuple[str, float, float]] = []
+    try:
+        with open(geojson_path, "r", encoding="utf-8") as fp:
+            gj = json.load(fp)
+        for feat in gj.get("features", []):
+            props = feat.get("properties", {})
+            name = props.get("NM_MUN") or props.get("nome") or props.get("name")
+            geom = feat.get("geometry", {})
+            if not name or not geom:
+                continue
+            coords_list: list[list[float]] = []
+            if geom.get("type") == "Polygon":
+                coords_list = geom.get("coordinates", [[]])[0]
+            elif geom.get("type") == "MultiPolygon":
+                # Usa o primeiro poligono (ilhas/dependencias territoriais raras)
+                polys = geom.get("coordinates", [])
+                if polys and polys[0]:
+                    coords_list = polys[0][0]
+            if not coords_list:
+                continue
+            lons = [c[0] for c in coords_list if len(c) >= 2]
+            lats = [c[1] for c in coords_list if len(c) >= 2]
+            if not lons or not lats:
+                continue
+            centroids.append((name, sum(lats) / len(lats), sum(lons) / len(lons)))
+        print(f"  Centroides carregados do geojson: {len(centroids)} municipios")
+    except Exception as err:
+        print(f"  WARN falha ao carregar geojson ({err}); usando fallback de 20 munis")
+        centroids = [
+            (name, c["lat"], c["lon"])
+            for name, c in MUNICIPIOS_PR_CENTROIDES.items()
+        ]
+
+    _CENTROIDS_CACHE = centroids
+    return centroids
+
+
+def find_nearest_municipality(lat, lon, max_distance_km=80):
+    """Encontra o municipio mais proximo de um foco de incendio.
+
+    Busca em todos os 399 municipios via centroides calculados do geojson.
+    Raio ampliado de 50km para 80km porque alguns municipios grandes do PR
+    (Foz, Guarapuava, Umuarama) tem centroides deslocados do limite oeste.
+    """
+    centroids = _load_all_centroids()
     nearest = None
-    min_distance = float('inf')
-    for municipio, coords in MUNICIPIOS_PR_CENTROIDES.items():
-        dist = haversine_distance(lat, lon, coords["lat"], coords["lon"])
+    min_distance = float("inf")
+    for name, clat, clon in centroids:
+        dist = haversine_distance(lat, lon, clat, clon)
         if dist < min_distance and dist <= max_distance_km:
             min_distance = dist
-            nearest = municipio
+            nearest = name
     return nearest
 
 
