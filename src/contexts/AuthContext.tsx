@@ -26,6 +26,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const [subscriptionFetched, setSubscriptionFetched] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const fetchSubscription = async (userId: string) => {
@@ -36,15 +37,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq('user_id', userId)
         .maybeSingle()
 
-      if (data) {
-        setSubscription(data as Subscription)
-      } else {
-        // Sem subscription - será tratado como 'none' pelo accessStatus
-        setSubscription(null)
-      }
+      setSubscription(data ? (data as Subscription) : null)
     } catch (e) {
       console.error('Erro ao buscar subscription:', e)
       setSubscription(null)
+    } finally {
+      setSubscriptionFetched(true)
     }
   }
 
@@ -64,10 +62,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         fetchSubscription(session.user.id).finally(() => setLoading(false))
       } else {
+        setSubscriptionFetched(true)
         setLoading(false)
       }
     }).catch((err) => {
       console.warn('Auth getSession failed:', err)
+      setSubscriptionFetched(true)
       setLoading(false)
     })
 
@@ -80,9 +80,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(session?.user ?? null)
 
           if (session?.user) {
+            setSubscriptionFetched(false)
             await fetchSubscription(session.user.id)
           } else {
             setSubscription(null)
+            setSubscriptionFetched(true)
           }
           setLoading(false)
         }
@@ -102,6 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const computedAccessStatus = React.useMemo((): AuthContextType['accessStatus'] => {
     if (loading) return 'loading'
     if (!user) return 'none'
+    if (!subscriptionFetched) return 'loading'
     if (!subscription) return 'none'
     const { status, trial_end } = subscription
     if (status === 'trialing') {
@@ -109,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return new Date(trial_end) > new Date() ? 'trialing' : 'expired'
     }
     return status as AuthContextType['accessStatus']
-  }, [subscription, loading, user])
+  }, [subscription, subscriptionFetched, loading, user])
 
   const hasAccess = computedAccessStatus === 'trialing' || computedAccessStatus === 'active'
   const isPro = hasAccess && (subscription?.plan === 'pro' || subscription?.plan === 'enterprise')
@@ -143,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut()
     setSubscription(null)
+    setSubscriptionFetched(true)
   }
 
   const resetPassword = async (email: string) => {
