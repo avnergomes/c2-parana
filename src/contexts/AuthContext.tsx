@@ -55,9 +55,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 8000)
 
-    // onAuthStateChange dispara INITIAL_SESSION imediatamente ao inscrever,
-    // entao nao precisamos chamar getSession() (que disputa o navigator lock
-    // do gotrue-js e causa AbortError).
+    // Bootstrap da sessao a partir do storage. O navigator lock foi desabilitado
+    // em src/lib/supabase.ts (noOpLock) entao getSession nao causa contention.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setUser(session?.user ?? null)
+      if (session?.user) {
+        fetchSubscription(session.user.id).finally(() => setLoading(false))
+      } else {
+        setSubscriptionFetched(true)
+        setLoading(false)
+      }
+    }).catch((err) => {
+      console.warn('Auth getSession failed:', err)
+      setSubscriptionFetched(true)
+      setLoading(false)
+    })
+
     let authListener: { unsubscribe: () => void } | null = null
     try {
       const { data } = supabase.auth.onAuthStateChange(

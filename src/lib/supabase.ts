@@ -14,6 +14,12 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Missing Supabase env vars. Copy .env.example to .env.local and fill in.')
 }
 
+// No-op lock para evitar contention do navigator lock do gotrue-js v2.39+,
+// que causava AbortError e travava getSession em alguns navegadores. Como o
+// app roda em uma unica aba por usuario na pratica, serializacao cross-tab
+// nao e necessaria.
+const noOpLock = async <R>(_name: string, _acquireTimeout: number, fn: () => Promise<R>): Promise<R> => fn()
+
 export const supabase = createClient<Database>(
   supabaseUrl || 'https://placeholder.supabase.co',
   supabaseAnonKey || 'placeholder',
@@ -22,6 +28,7 @@ export const supabase = createClient<Database>(
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      lock: noOpLock,
     },
     global: {
       headers: {
