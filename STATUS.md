@@ -1,7 +1,11 @@
 # C2 Paraná — Status de Implementação
 
 **Última atualização:** 2026-04-19
-**Substitui:** `c2-parana-prompts/`, `c2-parana-fix-prompts/`, `c2-parana-fix-prompts-v2/`, `PLANO_IMPLEMENTACAO_C4ISR.md`, `PLANO_FASE3.md`, `PLANO_FASE4.md`, `PLANO_FASE5.md`, `PLANO_CORRECAO.md` (todos consolidados aqui)
+**Substitui:** `c2-parana-prompts/`, `c2-parana-fix-prompts/`, `c2-parana-fix-prompts-v2/`, `PLANO_IMPLEMENTACAO_C4ISR.md`, `PLANO_FASE3.md`, `PLANO_FASE4.md`, `PLANO_FASE5.md`, `PLANO_CORRECAO.md` (todos consolidados aqui).
+
+**Também incorpora itens c2-parana de auditorias de ecossistema externas:**
+- `../AUDITORIA_ECOSSISTEMA_DATAGEOPARANA.md` (2026-03-26) — auditoria geral dos 16 repos
+- `../AVALIACAO_MONOREPO_E_PLANEJAMENTO.md` (2026-03-27) — viabilidade monorepo + correções
 
 Este é o **único documento ativo** de status. Planos antigos foram arquivados e removidos do repo. Atualize esta página a cada fechamento de fase.
 
@@ -186,23 +190,29 @@ Não iniciada. Itens previstos:
 | # | Item | Esforço | Status |
 |---|---|---|---|
 | 1 | Rotacionar `SUPABASE_SERVICE_ROLE_KEY`, `INFOHIDRO_USER/PASS`, `GETEC_USER/PASS` (estavam em `.env` commitado em 18/03) | 1-2h | ⏳ aguarda usuário (não verificável via código) |
+| 2 | Reduzir frequência de crons de alta frequência — hoje `cron-alerts`, `cron-cemaden`, `cron-escalation` rodam a cada 15-30min; `cron-clima` a cada 1h. Estimativa do ecossistema: **~2.979 execuções/mês → estoura limite free de 2.000min/mês**. Candidatos: `cron-alerts` */30→0 */2, `cron-clima` 0 *→0 */6, `cron-noticias` */15→0 */2 | 30min | ⏳ (auditoria ecossistema, item C4) |
 
 ### 🟠 P1 — Alta
 
 | # | Item | Esforço | Status |
 |---|---|---|---|
-| 2 | Verificar deploy das 4 edge functions + secrets Stripe | 30min | ⏳ |
-| 3 | Criar `src/lib/stripe.ts` singleton | 10min | ⏳ |
-| 4 | E2E Playwright do fluxo paywall: signup → trial → checkout → webhook → acesso | 1 sessão | ⏳ |
+| 3 | Verificar deploy das 4 edge functions + secrets Stripe | 30min | ⏳ |
+| 4 | Criar `src/lib/stripe.ts` singleton | 10min | ⏳ |
+| 5 | E2E Playwright do fluxo paywall: signup → trial → checkout → webhook → acesso | 1 sessão | ⏳ |
+| 6 | Flag `is_fallback: true` em dados sintéticos — `scripts/etl_agro.py:152` tem `vbp_total_brl: 152_000_000_000` hardcoded sem sinalização; dashboard exibe como dado real | 1h | ⏳ (auditoria ecossistema, item C7) |
+| 7 | Remover `data/idr-getec-raw/all_clients.csv` (61 MB) do repo — mover para Supabase Storage ou gerar no CI sem commitar | 30min | ⏳ (auditoria ecossistema, item C2) |
 
 ### 🟡 P2 — Média
 
 | # | Item | Esforço | Status |
 |---|---|---|---|
-| 5 | README real (hoje 13 bytes) | 30min | ⏳ |
-| 6 | Smoke test CEMADEN + DataSUS em prod (próximo run mensal: 05/05) | 20min | ⏳ |
-| 7 | Investigar pasta `reports/` vazia (Storage vs. local) | 1h | ⏳ |
-| 8 | Push notifications: plugar Firebase FCM | 1 sessão | ⏳ |
+| 8 | README real (hoje 13 bytes) | 30min | ⏳ |
+| 9 | Smoke test CEMADEN + DataSUS em prod (próximo run mensal: 05/05) | 20min | ⏳ |
+| 10 | Investigar pasta `reports/` vazia (Storage vs. local) | 1h | ⏳ |
+| 11 | Push notifications: plugar Firebase FCM | 1 sessão | ⏳ |
+| 12 | Atualizar Sentry SDK v7→v8 (`@sentry/react: ^7.100.0` descontinuado) | 30min | ⏳ (auditoria ecossistema, item A8) |
+| 13 | Atualizar deps Python em `scripts/requirements.txt`: `supabase==2.0.0` (atual 2.13+), `httpx==0.24.1` (atual 0.27+), `requests==2.31.0` | 1h | ⏳ (auditoria ecossistema, item A12) |
+| 14 | Investigar workaround `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` em 3+ workflows (pode quebrar no futuro) | 30min | ⏳ (auditoria ecossistema, item L11) |
 
 ### 🟢 P3 — Baixa / Diferido
 
@@ -212,10 +222,36 @@ Não iniciada. Itens previstos:
 - DENATRAN (5.G) e SICAR (5.H) — baixa prioridade
 - Backtesting histórico (3.E) — esperar dados (>24 meses)
 - Fase 6 completa (PWA offline, API pública, gov.br SSO)
+- **Estratégico:** migrar crons de alta frequência do GitHub Actions para Supabase Edge Functions (auditoria ecossistema, item 5.5) — elimina dependência do limite free do Actions
 
 ---
 
-## 8. Anti-drift — regras
+## 8. Auditoria do ecossistema DataGeoParana
+
+Itens c2-parana extraídos das duas auditorias externas (parent dir, fora do repo). Status verificado em 2026-04-19:
+
+| ID auditoria | Item | Status atual | Onde |
+|---|---|---|---|
+| C4 | GitHub Actions ~2.979 exec/mês — estoura limite free | ❌ não corrigido | crons */15, */30 ainda ativos (alerts, cemaden, escalation, noticias) |
+| C7 | `is_fallback` flag em dados sintéticos | ❌ não corrigido | `scripts/etl_agro.py:152` ainda tem `vbp_total_brl: 152_000_000_000` hardcoded |
+| C2 | CSV de 60 MB no repo | ❌ não corrigido | `data/idr-getec-raw/all_clients.csv` (61 MB) ainda commitado |
+| A8 | Sentry SDK v7→v8 | ❌ não corrigido | `package.json` tem `@sentry/react: ^7.100.0` |
+| A11 | README stub | ❌ não corrigido | 13 bytes |
+| A12 | Deps Python desatualizadas | ❌ não corrigido | `supabase==2.0.0`, `httpx==0.24.1`, `requests==2.31.0` |
+| L11 | Workaround `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` | ⚠️ ativo | 3+ workflows: cron-agua, cron-anomalies, cron-clima |
+| 0.4/0.5 | Reduzir cron-alerts (*/30→0 */2) e cron-clima (0 *→0 */6) | ❌ não aplicado | mesmas frequências originais |
+| 5.5 | Migrar crons alta freq para Supabase Edge Functions | 📅 estratégico | discussão arquitetural pendente |
+
+**Itens NÃO aplicáveis ao c2-parana** (mencionados nas auditorias mas resolvidos ou fora de escopo):
+- `.env` com secrets — já fora do tracking (corrigido ainda em março, ver `.gitignore`)
+- LICENSE — todos os repos do ecossistema, não exclusivo c2-parana
+- TopoJSON / GeoJSON compartilhado — c2-parana não duplica `mun_PR.json` localmente
+
+Os arquivos originais das auditorias permanecem no parent dir (`../AUDITORIA_ECOSSISTEMA_DATAGEOPARANA.md` e `../AVALIACAO_MONOREPO_E_PLANEJAMENTO.md`) porque cobrem 16 repos — não fazem sentido dentro deste repo isoladamente.
+
+---
+
+## 9. Anti-drift — regras
 
 1. **Um plano ativo só.** Quando uma fase fecha, atualize esta página e arquive notas em `docs/archive/`. Nada de criar novo `PLANO_*.md` na raiz.
 2. **Nenhum `TODO: reativar` no main sem issue rastreando.** O paywall ficou desligado ~1 mês sem rastreamento — não repetir.
