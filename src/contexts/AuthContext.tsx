@@ -55,23 +55,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 8000)
 
-    // Pegar sessão inicial
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchSubscription(session.user.id).finally(() => setLoading(false))
-      } else {
-        setSubscriptionFetched(true)
-        setLoading(false)
-      }
-    }).catch((err) => {
-      console.warn('Auth getSession failed:', err)
-      setSubscriptionFetched(true)
-      setLoading(false)
-    })
-
-    // Ouvir mudanças de auth
+    // onAuthStateChange dispara INITIAL_SESSION imediatamente ao inscrever,
+    // entao nao precisamos chamar getSession() (que disputa o navigator lock
+    // do gotrue-js e causa AbortError).
     let authListener: { unsubscribe: () => void } | null = null
     try {
       const { data } = supabase.auth.onAuthStateChange(
@@ -92,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authListener = data.subscription
     } catch (err) {
       console.warn('Auth listener setup failed:', err)
+      setSubscriptionFetched(true)
       setLoading(false)
     }
 
