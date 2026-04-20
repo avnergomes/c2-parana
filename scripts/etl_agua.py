@@ -243,70 +243,123 @@ def fetch_reservatorios_telemetry_api() -> list:
         return []
 
 
+def _has_jwt_in_storage(page) -> bool:
+    """Verifica se o Vuex Authentication tem token, sinal de login efetivo."""
+    try:
+        return bool(page.evaluate(
+            "() => { const v=document.querySelector('#app')?.__vue__;"
+            "  const a=v?.$store?.state?.Authentication;"
+            "  if(!a) return false;"
+            "  return Object.keys(a).some(k => /token|jwt|access/i.test(k) && a[k]); }"
+        ))
+    except Exception:
+        return False
+
+
 def login_infohidro(page) -> bool:
-    """Login to InfoHidro via the Vue SPA login form."""
+    """Login to InfoHidro via the Vue SPA login form.
+
+    Verificado em 2026-04-19: post-login o SPA redireciona para /Home
+    (rota default 'Weather'), nao /Monitoring. A versao anterior esperava
+    /Monitoring, dava timeout, e o except declarava falsamente "Ja
+    autenticado" mesmo quando o login havia falhado de fato.
+    """
     if not INFOHIDRO_USER or not INFOHIDRO_PASS:
         print("  AVISO: Credenciais InfoHidro não configuradas")
         return False
 
+    # Se ja autenticado por sessao previa, evita re-login
+    try:
+        page.goto(f"{INFOHIDRO_BASE}/Home", wait_until="domcontentloaded", timeout=15000)
+        if "/Login" not in page.url and _has_jwt_in_storage(page):
+            print("  Sessao InfoHidro ja autenticada")
+            return True
+    except Exception:
+        pass
+
     try:
         page.goto(f"{INFOHIDRO_BASE}/Login", wait_until="networkidle", timeout=30000)
 
-        # Wait for Vue login form to render
+        # Form pode ja ter redirecionado se houver sessao
+        if "/Login" not in page.url and _has_jwt_in_storage(page):
+            print("  Sessao InfoHidro ja autenticada (redirect)")
+            return True
+
         page.wait_for_selector('input[type="text"], input[type="email"]', timeout=10000)
 
-        # Fill email
         email_input = page.query_selector('input[type="text"], input[type="email"]')
         if email_input:
             email_input.fill(INFOHIDRO_USER)
 
-        # Fill password
         pass_input = page.query_selector('input[type="password"]')
         if pass_input:
             pass_input.fill(INFOHIDRO_PASS)
 
-        # Click login button
         login_btn = page.query_selector('button[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
         if login_btn:
             login_btn.click()
-        else:
-            # Try pressing Enter
+        elif pass_input:
             pass_input.press("Enter")
+        else:
+            print("  Erro login InfoHidro: campos do formulario nao encontrados")
+            return False
 
-        # Wait for navigation to /Monitoring or home
-        page.wait_for_url("**/Monitoring**", timeout=15000)
-        print(f"  Autenticado no InfoHidro como {INFOHIDRO_USER}")
-        return True
+        # Espera redirect para QUALQUER rota pos-login (Home/Monitoring/raiz)
+        # ou no minimo o JWT aparecer no Vuex Authentication.
+        try:
+            page.wait_for_function(
+                "() => !location.pathname.includes('/Login')",
+                timeout=15000,
+            )
+        except Exception:
+            # Pode ter ficado em /Login com mensagem de erro inline
+            pass
+
+        # Confirma com prova positiva: token no store
+        for _ in range(10):
+            if _has_jwt_in_storage(page):
+                print(f"  Autenticado no InfoHidro como {INFOHIDRO_USER} (URL: {page.url.split('//', 1)[-1].split('/', 1)[-1]})")
+                return True
+            page.wait_for_timeout(500)
+
+        print(f"  Erro login InfoHidro: token nao apareceu no store apos submit (URL final: {page.url})")
+        return False
 
     except Exception as e:
-        # Check if already logged in (redirected to home)
-        if "/Login" not in page.url:
-            print(f"  Já autenticado no InfoHidro")
-            return True
         print(f"  Erro login InfoHidro: {e}")
         return False
 
 
 def scrape_mananciais(page) -> list:
-    """Extract mananciais data from the Monitoring page's Vuex store."""
+    """Extract mananciais data from the Monitoring page's Vuex store.
+
+    Verificado em 2026-04-19: InfoHidro usa Vue 2, store em
+    `__vue__.$store.state.Locations.fountains` (291 entradas em prod).
+    O fountains e populado por XHR async apos a navegacao, entao fazemos
+    poll por ate 20s em vez de wait fixo de 3s (que falhava no GH Actions
+    headless mais lento que ambiente local).
+    """
     try:
         page.goto(f"{INFOHIDRO_BASE}/Monitoring", wait_until="networkidle", timeout=30000)
-
-        # Wait for Vue app to load
         page.wait_for_selector('#app', timeout=10000)
-        page.wait_for_timeout(3000)  # Let Vuex store populate
 
-        # Extract fountains from Vuex store
-        fountains = page.evaluate("""
-            () => {
-                const vue = document.querySelector('#app')?.__vue__;
-                if (!vue?.$store?.state?.Locations?.fountains) return null;
-                return vue.$store.state.Locations.fountains;
-            }
-        """)
+        # Poll: aguarda o XHR popular o store (max 20s, intervalo 500ms)
+        try:
+            page.wait_for_function(
+                "() => { const v=document.querySelector('#app')?.__vue__;"
+                "  const f=v?.$store?.state?.Locations?.fountains;"
+                "  return Array.isArray(f) && f.length > 0; }",
+                timeout=20000,
+            )
+        except Exception:
+            pass
+
+        fountains = page.evaluate(
+            "() => document.querySelector('#app')?.__vue__?.$store?.state?.Locations?.fountains ?? null"
+        )
 
         if not fountains:
-            print("  Não foi possível extrair mananciais do Vuex store")
+            print("  Não foi possível extrair mananciais do Vuex store (apos 20s de poll)")
             return []
 
         print(f"  {len(fountains)} mananciais encontrados no Vuex store")
