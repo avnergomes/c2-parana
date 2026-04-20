@@ -213,6 +213,7 @@ Não iniciada. Itens previstos:
 | 12 | Atualizar Sentry SDK v7→v8 (`@sentry/react: ^7.100.0` descontinuado) | 30min | ⏳ (auditoria ecossistema, item A8) |
 | 13 | Atualizar deps Python em `scripts/requirements.txt`: `supabase==2.0.0` (atual 2.13+), `httpx==0.24.1` (atual 0.27+), `requests==2.31.0` | 1h | ⏳ (auditoria ecossistema, item A12) |
 | 14 | Investigar workaround `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true` em 3+ workflows (pode quebrar no futuro) | 30min | ⏳ (auditoria ecossistema, item L11) |
+| 15 | **Contatar SIMEPAR** para API key ou OAuth client credentials do InfoHidro — upstream removeu login self-service (form `/Login` agora é "Solicitar Cadastro", sem campo de senha). Mananciais congelados desde 2026-03-18 (`infohidro_mananciais_pr` stale). Endpoint OAuth2 existe (`/authentication/v1/oauth2/accessToken`) mas precisa client_id | 30min (contato) + 1h (integração) | ⏳ bloqueado por terceiros |
 
 ### 🟢 P3 — Baixa / Diferido
 
