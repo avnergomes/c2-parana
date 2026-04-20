@@ -1,5 +1,5 @@
 // src/components/ui/EtlHealthPanel.tsx
-import { useEtlHealth } from '@/hooks/useEtlHealth'
+import { useEtlHealth, ETL_FRESHNESS_HOURS, ETL_FRESHNESS_DEFAULT_HOURS } from '@/hooks/useEtlHealth'
 import { Activity, CheckCircle, AlertTriangle, XCircle, Clock, RefreshCw } from 'lucide-react'
 
 function StatusIcon({ status }: { status: string }) {
@@ -7,7 +7,7 @@ function StatusIcon({ status }: { status: string }) {
   if (s === 'success' || s === 'ok') {
     return <CheckCircle className="w-4 h-4 text-accent-green" />
   }
-  if (s === 'partial' || s === 'unavailable') {
+  if (s === 'partial' || s === 'unavailable' || s === 'stale') {
     return <AlertTriangle className="w-4 h-4 text-status-warning" />
   }
   return <XCircle className="w-4 h-4 text-status-danger" />
@@ -52,11 +52,14 @@ export function EtlHealthPanel() {
 
   const etls = health || []
 
-  // Calculate overall health
+  // Conta como saudavel: status success/ok E nao stale (dentro da janela do cron)
   const totalEtls = 6
-  const healthyCount = etls.filter(e =>
-    e.data?.status?.toLowerCase() === 'success' || e.data?.status?.toLowerCase() === 'ok'
-  ).length
+  const healthyCount = etls.filter(e => {
+    const s = e.data?.status?.toLowerCase()
+    if (s !== 'success' && s !== 'ok') return false
+    const limit = ETL_FRESHNESS_HOURS[e.cache_key] ?? ETL_FRESHNESS_DEFAULT_HOURS
+    return !isStale(e.data?.last_run, limit)
+  }).length
   const overallStatus = healthyCount === totalEtls
     ? 'healthy'
     : healthyCount >= totalEtls / 2
@@ -96,8 +99,16 @@ export function EtlHealthPanel() {
         ) : (
           etls.map(etl => {
             const d = etl.data || {}
-            const stale = isStale(d.last_run, 25) // Consider stale if >25h old
+            const freshnessLimit = ETL_FRESHNESS_HOURS[etl.cache_key] ?? ETL_FRESHNESS_DEFAULT_HOURS
+            const stale = isStale(d.last_run, freshnessLimit)
             const hasErrors = d.errors && d.errors.length > 0
+            // status reportado pelo proprio ETL na ultima execucao
+            const reportedStatus = d.status?.toLowerCase()
+            // Stale-mas-success vira "stale" (warning amarelo); stale com erro
+            // ou status nao-success vai pra logica normal (vermelho).
+            const displayStatus = stale && (reportedStatus === 'success' || reportedStatus === 'ok')
+              ? 'stale'
+              : d.status
 
             return (
               <div
@@ -107,7 +118,7 @@ export function EtlHealthPanel() {
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <StatusIcon status={stale ? 'stale' : d.status} />
+                  <StatusIcon status={displayStatus} />
                   <span className="text-xs text-text-primary truncate">
                     {etl.displayName}
                   </span>

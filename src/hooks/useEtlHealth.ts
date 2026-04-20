@@ -32,6 +32,19 @@ const ETL_DISPLAY_NAMES: Record<string, string> = {
   etl_health_agua: 'Água (InfoHidro/SAR)',
 }
 
+// Janela aceitavel ate considerar a ultima execucao "stale", em horas.
+// Calibrada pelo cron de cada ETL com 1.5x de folga para tolerar atrasos do
+// scheduler do GitHub Actions e finais de semana sem execucao agendada.
+export const ETL_FRESHNESS_HOURS: Record<string, number> = {
+  etl_health_clima: 3,           // cron horario
+  etl_health_ambiente: 18,       // cron 12h
+  etl_health_agua: 9,            // cron 6h
+  etl_health_legislativo: 96,    // cron dias uteis -> ate 72h no fim de semana
+  etl_health_saude: 84,          // cron seg/qua/sex -> ate 72h
+  etl_health_agro: 192,          // cron semanal (segundas) -> 8 dias
+}
+export const ETL_FRESHNESS_DEFAULT_HOURS = 25
+
 export function useEtlHealth() {
   return useQuery({
     queryKey: ['etl-health'],
