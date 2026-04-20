@@ -105,20 +105,32 @@ export function useDengueTrend(semanas = 8) {
       }
 
       if (allRows.length === 0) return []
-      const data = allRows
 
-      // Aggregate by week
-      const byWeek: Record<string, number> = {}
-      for (const row of data) {
-        const key = `${row.year}-SE${String(row.epidemiological_week).padStart(2, '0')}`
-        byWeek[key] = (byWeek[key] || 0) + (row.cases || 0)
+      // Aggregate by week. Chave interna mantem year-SE## para ordenacao
+      // determinista (SE04/2025 < SE10/2026), mas gera label amigavel que
+      // inclui o ano quando o range do grafico cruza anos (evita ilusao
+      // de sequencia SE04 -> SE10 sem indicacao do gap de ano).
+      const byWeek = new Map<string, { year: number; week: number; casos: number }>()
+      for (const row of allRows) {
+        const year = row.year
+        const week = row.epidemiological_week
+        const key = `${year}-SE${String(week).padStart(2, '0')}`
+        const prev = byWeek.get(key)
+        if (prev) prev.casos += row.cases || 0
+        else byWeek.set(key, { year, week, casos: row.cases || 0 })
       }
 
-      const weeks = Object.entries(byWeek)
-        .map(([semana, casos]) => ({ semana, casos }))
-        .sort((a, b) => a.semana.localeCompare(b.semana))
+      const entries = Array.from(byWeek.values())
+        .sort((a, b) => a.year !== b.year ? a.year - b.year : a.week - b.week)
+        .slice(-semanas)
 
-      return weeks.slice(-semanas)
+      const crossesYear = entries.length > 0 && entries[0].year !== entries[entries.length - 1].year
+      return entries.map(e => ({
+        semana: crossesYear
+          ? `SE${String(e.week).padStart(2, '0')}/${String(e.year).slice(-2)}`
+          : `SE${String(e.week).padStart(2, '0')}`,
+        casos: e.casos,
+      }))
     },
     staleTime: 1000 * 60 * 60,
   })

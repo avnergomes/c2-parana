@@ -261,9 +261,12 @@ def fetch_dengue_municipality(mun: dict, limiter: AdaptiveRateLimiter) -> dict:
             dengue_records = []
 
             # InfoDengue returns records in DESCENDING order (newest first).
-            # records[:4] takes the 4 most recent weeks; the previous
-            # records[-4:] was taking the 4 OLDEST (weeks 1-4 of 2025).
-            for rec in records[:4]:
+            # Pegamos ate 52 semanas (1 ano) por run para preencher gaps de
+            # historico (antes pegava so 4, o que criava buracos quando runs
+            # consecutivos nao cobriam semanas contiguas). Upsert na tabela
+            # e idempotente (on_conflict=ibge_code,year,epidemiological_week)
+            # entao re-inserir e seguro e acelera backfill.
+            for rec in records[:52]:
                 try:
                     se = int(rec.get("SE", 0))
                     year = int(str(se)[:4]) if se > 10000 else CURRENT_YEAR
