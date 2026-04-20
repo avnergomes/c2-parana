@@ -224,12 +224,14 @@ def request_with_retry(url, method='GET', max_retries=3, timeout=30, **kwargs):
 def fetch_firms():
     """Busca focos de calor VIIRS SNPP do NASA FIRMS com retry.
 
-    Janela de 10 dias (maximo permitido pela API FIRMS) para tolerar falhas
-    de cron sem criar gap permanente no historico. Com a janela anterior
-    de 1 dia, qualquer run perdido deixava um buraco definitivo em
-    fire_spots. Upsert com UNIQUE constraint deduplica re-inserts.
+    Janela de 5 dias (maximo permitido pela API FIRMS VIIRS_SNPP_NRT,
+    verificado: status 400 "Invalid day range. Expects [1..5]" para valores
+    acima). Com a janela anterior de 1 dia, qualquer run perdido deixava
+    um buraco definitivo em fire_spots. Com cron 12h x5 dias = 10 runs
+    de cobertura; gaps so se mais de 4 dias de cron falham seguidos.
+    UNIQUE constraint deduplica re-inserts.
     """
-    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_KEY}/VIIRS_SNPP_NRT/{PR_BBOX}/10"
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_KEY}/VIIRS_SNPP_NRT/{PR_BBOX}/5"
     try:
         resp = request_with_retry(url, method='GET', max_retries=3, timeout=60)
 
