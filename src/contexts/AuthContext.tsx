@@ -73,19 +73,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })
 
     let authListener: { unsubscribe: () => void } | null = null
+    let lastUserId: string | null = null
     try {
       const { data } = supabase.auth.onAuthStateChange(
         async (_event, session) => {
+          const newUserId = session?.user?.id ?? null
           setSession(session)
           setUser(session?.user ?? null)
 
           if (session?.user) {
-            setSubscriptionFetched(false)
-            await fetchSubscription(session.user.id)
+            // So re-buscar subscription se o user mudou (SIGNED_IN/SIGNED_OUT/
+            // user different). Em TOKEN_REFRESHED do mesmo user, a subscription
+            // nao muda — nao resetamos subscriptionFetched para nao derrubar
+            // accessStatus temporariamente para 'loading' (o que causava
+            // redirect para /pricing em sessoes longas).
+            if (newUserId !== lastUserId) {
+              setSubscriptionFetched(false)
+              await fetchSubscription(session.user.id)
+            }
           } else {
             setSubscription(null)
             setSubscriptionFetched(true)
           }
+          lastUserId = newUserId
           setLoading(false)
         }
       )

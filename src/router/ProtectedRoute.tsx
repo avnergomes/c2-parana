@@ -9,10 +9,13 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requirePro = false }: ProtectedRouteProps) {
-  const { loading, user, hasAccess, isPro } = useAuth()
+  const { loading, accessStatus, user, hasAccess, isPro } = useAuth()
   const location = useLocation()
 
-  if (loading) return <LoadingScreen />
+  // Aguarda tanto o bootstrap inicial (loading) quanto refetches intermediarios
+  // (accessStatus === 'loading'). Sem isso, TOKEN_REFRESHED em sessoes longas
+  // derrubava hasAccess temporariamente e jogava o usuario para /pricing.
+  if (loading || accessStatus === 'loading') return <LoadingScreen />
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />
