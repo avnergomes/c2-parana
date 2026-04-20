@@ -15,6 +15,7 @@ Credentials: INFOHIDRO_USER, INFOHIDRO_PASS
 
 import os
 import json
+import re
 import time
 import requests
 from datetime import datetime
@@ -243,17 +244,213 @@ def fetch_reservatorios_telemetry_api() -> list:
         return []
 
 
-def _has_jwt_in_storage(page) -> bool:
-    """Verifica se o Vuex Authentication tem token, sinal de login efetivo."""
+def _create_infohidro_session() -> requests.Session:
+    """Session com headers browser-like; as APIs /forecast/v1 e o HTML de
+    /Monitoring ficam publicos por tras de um check de Referer/Origin.
+
+    Espelha etl_infohidro.py (script irmao que funciona). Nao requer login.
+    """
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": f"{INFOHIDRO_BASE}/Monitoring",
+        "Origin": INFOHIDRO_BASE,
+    })
     try:
-        return bool(page.evaluate(
-            "() => { const v=document.querySelector('#app')?.__vue__;"
-            "  const a=v?.$store?.state?.Authentication;"
-            "  if(!a) return false;"
-            "  return Object.keys(a).some(k => /token|jwt|access/i.test(k) && a[k]); }"
-        ))
+        session.get(f"{INFOHIDRO_BASE}/", timeout=15)
     except Exception:
-        return False
+        pass
+    return session
+
+
+def _extract_fountains_from_monitoring_html(session: requests.Session) -> list:
+    """Extrai fountains do HTML de /Monitoring via regex.
+
+    Verificado em 2026-04-19: o /Login do InfoHidro agora mostra form de
+    'Solicitar Cadastro' (sem campo de senha). Login via browser nao e mais
+    viavel. Mas o HTML de /Monitoring embute os fountains no bundle/dados
+    iniciais e os endpoints /forecast/v1/* aceitam requests sem auth desde
+    que os headers estejam corretos.
+    """
+    try:
+        resp = session.get(f"{INFOHIDRO_BASE}/Monitoring", timeout=30)
+        if resp.status_code != 200:
+            print(f"  Monitoring HTTP {resp.status_code}")
+            return []
+        text = resp.text
+
+        for pattern in [
+            r'fountains\s*:\s*(\[.*?\])\s*[,}]',
+            r'"fountains"\s*:\s*(\[.*?\])\s*[,}]',
+        ]:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                try:
+                    fountains = json.loads(match.group(1))
+                    if isinstance(fountains, list) and len(fountains) > 0:
+                        return fountains
+                except json.JSONDecodeError:
+                    continue
+
+        json_arrays = re.findall(
+            r'\[(\{[^[\]]*"locationid"[^[\]]*\}(?:,\{[^[\]]*"locationid"[^[\]]*\})*)\]',
+            text,
+        )
+        for arr_str in json_arrays:
+            try:
+                arr = json.loads(f"[{arr_str}]")
+                if len(arr) > 100:
+                    return arr
+            except json.JSONDecodeError:
+                continue
+
+        return []
+    except Exception as e:
+        print(f"  Erro ao extrair fountains: {e}")
+        return []
+
+
+def _load_cached_mananciais(supabase_client) -> list:
+    """Le mananciais do cache Supabase (dados historicos do ultimo scrape OK)."""
+    try:
+        resp = supabase_client.table("data_cache").select("data, fetched_at").eq(
+            "cache_key", "infohidro_mananciais_pr"
+        ).execute()
+        if not resp.data:
+            return []
+        payload = resp.data[0]["data"]
+        items = payload.get("items") if isinstance(payload, dict) else payload
+        if isinstance(items, list) and items:
+            print(f"  Cache mananciais: {len(items)} registros (fetched {resp.data[0]['fetched_at']})")
+            return items
+    except Exception as e:
+        print(f"  Erro lendo cache mananciais: {e}")
+    return []
+
+
+def fetch_mananciais_via_session(supabase_client) -> tuple[list, bool]:
+    """Busca mananciais via HTTP session. Retorna (items, is_stale).
+
+    NOTA (2026-04-20): InfoHidro removeu o form de login self-service do
+    /Login (agora so exibe 'Solicitar Cadastro'), e os fountains sao
+    carregados por XHR autenticado que nao temos como replicar. O HTML
+    publico de /Monitoring e apenas o shell do SPA (1.1KB, sem dados).
+
+    Estrategia atual: tenta ler fountains do HTML via regex (caso SIMEPAR
+    volte a embutir), e se vier vazio, cai para o cache Supabase (dados do
+    ultimo scrape que funcionou, historicamente 2026-03-18). Flag is_stale
+    sinaliza que precisamos de acao humana: contato com SIMEPAR para API
+    key ou OAuth client credentials.
+    """
+    session = _create_infohidro_session()
+    fountains = _extract_fountains_from_monitoring_html(session)
+    if not fountains:
+        print("  Sem fountains no HTML (esperado; /Monitoring e SPA shell)")
+        cached = _load_cached_mananciais(supabase_client)
+        return cached, True
+    print(f"  {len(fountains)} mananciais via HTML")
+
+    location_ids = [int(f["locationid"]) for f in fountains if "locationid" in f]
+    fountain_map = {int(f["locationid"]): f for f in fountains if "locationid" in f}
+
+    water_data: dict = {}
+    print("  Buscando disponibilidade hidrica...")
+    for i in range(0, len(location_ids), 20):
+        batch = location_ids[i:i + 20]
+        ids_param = ",".join(str(lid) for lid in batch)
+        try:
+            resp = session.get(
+                f"{INFOHIDRO_BASE}/forecast/v1/wateravailability",
+                params={"location_ids": ids_param},
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                for d in resp.json():
+                    lid = d.get("locationid")
+                    if lid is not None:
+                        water_data[int(lid)] = d
+        except Exception as e:
+            print(f"    Erro batch water {i}: {e}")
+    print(f"  Disponibilidade: {len(water_data)} registros")
+
+    meteo_data: dict = {}
+    print("  Buscando meteorologia...")
+    for i in range(0, len(location_ids), 20):
+        batch = location_ids[i:i + 20]
+        ids_param = ",".join(str(lid) for lid in batch)
+        try:
+            resp = session.get(
+                f"{INFOHIDRO_BASE}/forecast/v1/forecastdata",
+                params={"summaryType": "daily", "source_ids": "22", "location_ids": ids_param},
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                for d in resp.json():
+                    lid = d.get("locationid") or d.get("location_id")
+                    if lid is not None:
+                        meteo_data[int(lid)] = d
+        except Exception as e:
+            print(f"    Erro batch meteo {i}: {e}")
+    print(f"  Meteorologia: {len(meteo_data)} registros")
+
+    def _to_float(v):
+        if v is None or v == "":
+            return None
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return None
+
+    mananciais = []
+    for lid in location_ids:
+        f = fountain_map.get(lid, {})
+        parts = [p.strip() for p in (f.get("locationname") or "").split(" - ")]
+        sia_code = parts[1] if len(parts) > 1 else ""
+        municipio = parts[2] if len(parts) > 2 else (f.get("locationname") or "")
+        sistema = parts[3] if len(parts) > 3 else ""
+        rio = parts[4] if len(parts) > 4 else ""
+
+        water = water_data.get(lid, {})
+        meteo = meteo_data.get(lid, {})
+
+        q1 = _to_float(water.get("q1"))
+        q30 = _to_float(water.get("q30"))
+        disponibilidade = None
+        alerta = False
+        if q1 is not None and q30 is not None and q1 > 0:
+            ratio = q30 / q1
+            if ratio < 0.3:
+                disponibilidade, alerta = "critico", True
+            elif ratio < 0.6:
+                disponibilidade, alerta = "baixo", True
+            elif ratio < 0.9:
+                disponibilidade = "normal"
+            else:
+                disponibilidade = "alto"
+
+        mananciais.append({
+            "locationid": lid,
+            "sia_code": sia_code,
+            "municipio": municipio,
+            "sistema": sistema,
+            "rio": rio,
+            "vazao_m3s": None,
+            "tendencia": None,
+            "disponibilidade": disponibilidade,
+            "q1": round(q1, 5) if q1 is not None else None,
+            "q30": round(q30, 5) if q30 is not None else None,
+            "alerta": alerta,
+            "chuva_mm": _to_float(meteo.get("precIntensity") or meteo.get("precipIntensity")),
+            "prob_chuva": _to_float(meteo.get("precProbability") or meteo.get("precipProbability")),
+            "temp_min": _to_float(meteo.get("tempMin")),
+            "temp_max": _to_float(meteo.get("tempMax")),
+            "umidade_min": _to_float(meteo.get("minHumidity")),
+            "umidade_max": _to_float(meteo.get("maxHumidity")),
+            "ultima_atualizacao": datetime.now().strftime("%Y-%m-%d"),
+        })
+
+    return mananciais, False
 
 
 def login_infohidro(page) -> bool:
@@ -615,49 +812,34 @@ def main():
         results["reservatorios"] = "SEM DADOS"
         errors.append("Não foi possível coletar dados de reservatórios")
 
-    # 2. Mananciais: Only via Playwright if available and credentials set
+    # 2. Mananciais: via HTTP session (sem login). Se upstream nao der dados
+    # frescos (InfoHidro removeu login self-service em 2026-04), usa cache
+    # existente e flagueia como 'stale' nos errors.
     print("2/2 Coletando dados de mananciais...")
     mananciais = []
-
-    if not PLAYWRIGHT_AVAILABLE:
-        print("  AVISO: Playwright não disponível, pulando mananciais")
-        print("  Instale com: pip install playwright && playwright install")
-        errors.append("Playwright não instalado (mananciais pulados)")
-        results["mananciais"] = "PULADO (Playwright não disponível)"
-    elif not INFOHIDRO_USER or not INFOHIDRO_PASS:
-        print("  AVISO: Credenciais InfoHidro não configuradas, pulando mananciais")
-        errors.append("Credenciais InfoHidro não configuradas (mananciais pulados)")
-        results["mananciais"] = "PULADO (Credenciais não configuradas)"
-    else:
-        try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                )
-                page = context.new_page()
-
-                if login_infohidro(page):
-                    mananciais = scrape_mananciais(page)
-                    if mananciais:
-                        upsert_cache(supabase_client, "infohidro_mananciais_pr", mananciais, "infohidro_monitoring")
-                        em_alerta = sum(1 for m in mananciais if m.get("alerta"))
-                        municipios = len(set(m.get("municipio", "") for m in mananciais))
-                        mananciais_count = len(mananciais)
-                        results["mananciais"] = f"OK ({mananciais_count} mananciais, {em_alerta} alertas, {municipios} municípios)"
-                    else:
-                        results["mananciais"] = "SEM DADOS"
-                        errors.append("Não foi possível extrair mananciais")
-                else:
-                    results["mananciais"] = "ERRO AUTENTICAÇÃO"
-                    errors.append("Falha ao autenticar no InfoHidro")
-
-                browser.close()
-        except Exception as e:
-            print(f"  ERRO Playwright mananciais: {e}")
-            results["mananciais"] = f"ERRO: {e}"
-            errors.append(f"Playwright mananciais: {e}")
+    is_stale = False
+    try:
+        mananciais, is_stale = fetch_mananciais_via_session(supabase_client)
+        if mananciais and not is_stale:
+            upsert_cache(supabase_client, "infohidro_mananciais_pr", mananciais, "infohidro_monitoring")
+            em_alerta = sum(1 for m in mananciais if m.get("alerta"))
+            municipios = len(set(m.get("municipio", "") for m in mananciais))
+            mananciais_count = len(mananciais)
+            results["mananciais"] = f"OK ({mananciais_count} mananciais, {em_alerta} alertas, {municipios} municipios)"
+        elif mananciais and is_stale:
+            mananciais_count = len(mananciais)
+            results["mananciais"] = f"STALE ({mananciais_count} cached)"
+            errors.append(
+                "Mananciais via cache (InfoHidro removeu login self-service; "
+                "contatar SIMEPAR para API key/OAuth client credentials)"
+            )
+        else:
+            results["mananciais"] = "SEM DADOS"
+            errors.append("Nao foi possivel extrair mananciais nem ler cache")
+    except Exception as e:
+        print(f"  ERRO mananciais: {e}")
+        results["mananciais"] = f"ERRO: {e}"
+        errors.append(f"Mananciais: {e}")
 
     # === ETL Health Tracking ===
     print("\n=== Registrando saúde da ETL ===")
