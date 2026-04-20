@@ -7,6 +7,8 @@
 - `../AUDITORIA_ECOSSISTEMA_DATAGEOPARANA.md` (2026-03-26) — auditoria geral dos 16 repos
 - `../AVALIACAO_MONOREPO_E_PLANEJAMENTO.md` (2026-03-27) — viabilidade monorepo + correções
 
+**2026-04-20 — sweep anti-gap nos ETLs:** auditoria sistemática revelou 4 bugs de "janela curta de API / slice limitante" causando gaps permanentes em `dengue_data` (14 semanas), `fire_spots` (13/14 dias vazios) e `climate_data` (gap de 19h nas 12 estações). Fixes em `etl_saude` (`records[:4]→[:52]`), `etl_ambiente` (FIRMS janela 1d→5d + insert com dedup por duplicate-key em vez de upsert incompatível com `COALESCE` no UNIQUE INDEX) e `etl_clima` (`records[-6:]→[-48:]`). Todas as tabelas agora com cobertura densa e sem gaps.
+
 Este é o **único documento ativo** de status. Planos antigos foram arquivados e removidos do repo. Atualize esta página a cada fechamento de fase.
 
 ---
