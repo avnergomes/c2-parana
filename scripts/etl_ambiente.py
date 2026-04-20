@@ -222,8 +222,14 @@ def request_with_retry(url, method='GET', max_retries=3, timeout=30, **kwargs):
     return None
 
 def fetch_firms():
-    """Busca focos de calor VIIRS SNPP do NASA FIRMS com retry."""
-    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_KEY}/VIIRS_SNPP_NRT/{PR_BBOX}/1"
+    """Busca focos de calor VIIRS SNPP do NASA FIRMS com retry.
+
+    Janela de 10 dias (maximo permitido pela API FIRMS) para tolerar falhas
+    de cron sem criar gap permanente no historico. Com a janela anterior
+    de 1 dia, qualquer run perdido deixava um buraco definitivo em
+    fire_spots. Upsert com UNIQUE constraint deduplica re-inserts.
+    """
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_KEY}/VIIRS_SNPP_NRT/{PR_BBOX}/10"
     try:
         resp = request_with_retry(url, method='GET', max_retries=3, timeout=60)
 
@@ -547,9 +553,39 @@ def fetch_ana_rivers():
     print(f"ANA: {len(records)} estações coletadas")
     return records
 
+def _insert_fire_spots_dedupe(supabase, records):
+    """Insert fire_spots um a um com dedup defensivo.
+
+    O UNIQUE INDEX em fire_spots usa COALESCE(acq_time, '') em expressao,
+    o que o PostgREST on_conflict nao consegue referenciar. Antes o script
+    tentava upsert, caia em constraint error, e usava fallback delete+insert
+    que apagava focos dos ultimos 1-dia (causando perda permanente do
+    historico quando a janela FIRMS nao cobria os dias deletados).
+
+    Solucao sem depender de migration: insert um a um, e em caso de
+    duplicate key (UNIQUE existente), simplesmente ignoramos. Preserva
+    historico sem apagar nada.
+    """
+    inserted = 0
+    skipped = 0
+    errors = 0
+    for rec in records:
+        try:
+            supabase.table("fire_spots").insert(rec).execute()
+            inserted += 1
+        except Exception as e:
+            msg = str(e).lower()
+            if "duplicate key" in msg or "23505" in msg:
+                skipped += 1
+            else:
+                errors += 1
+    return inserted, skipped, errors
+
+
 def _try_upsert_with_fallback(supabase, table_name, records, conflict_field):
     """
     Tenta upsert, e se falhar com constraint error, faz delete+insert.
+    NAO usado mais para fire_spots (ver _insert_fire_spots_dedupe).
     """
     try:
         supabase.table(table_name).upsert(
@@ -560,12 +596,8 @@ def _try_upsert_with_fallback(supabase, table_name, records, conflict_field):
     except Exception as e:
         error_str = str(e)
         if "no unique or exclusion constraint" in error_str or "constraint" in error_str.lower():
-            # Constraint não existe ou diferente - fazer delete+insert
             try:
-                if table_name == "fire_spots":
-                    cutoff = (datetime.now() - timedelta(days=1)).date().isoformat()
-                    supabase.table(table_name).delete().gte("acq_date", cutoff).execute()
-                elif table_name == "air_quality":
+                if table_name == "air_quality":
                     for rec in records:
                         supabase.table(table_name).delete().eq("city", rec["city"]).execute()
                 elif table_name == "river_levels":
@@ -600,12 +632,10 @@ def main():
         spots = fetch_firms()
         firms_count = len(spots)
         if spots:
-            success, msg = _try_upsert_with_fallback(supabase, "fire_spots", spots, "latitude,longitude,acq_date")
-            if success:
-                print(f"  {len(spots)} focos inseridos/atualizados {f'({msg})' if msg else ''}")
-            else:
-                print(f"  ERRO ao inserir focos: {msg}")
-                errors.append(f"FIRMS insert: {msg}")
+            inserted, skipped, err_count = _insert_fire_spots_dedupe(supabase, spots)
+            print(f"  FIRMS: {inserted} inseridos, {skipped} ja existiam (dedup), {err_count} erros")
+            if err_count > 0:
+                errors.append(f"FIRMS insert: {err_count} records falharam")
 
             # Limpar focos com mais de 30 dias
             try:

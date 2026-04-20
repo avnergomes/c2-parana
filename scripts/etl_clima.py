@@ -270,8 +270,11 @@ def fetch_openmeteo_hourly(station_code: str, meta: dict, days: int = 2) -> list
                 "observed_at": observed_at,
             })
 
-        # Retornar últimas 6 horas
-        return records[-6:]
+        # Retornar ultimas 48 horas. UNIQUE constraint em
+        # (station_code, observed_at) deduplica overlaps entre runs.
+        # Antes pegava so 6 horas, o que criava gaps quando cron atrasava
+        # mais que 6h (ex: noturno, falhas de runner).
+        return records[-48:]
     except Exception as e:
         print(f"    Open-Meteo hourly ERRO: {e}")
         return []
@@ -405,7 +408,10 @@ def main():
 
         if raw_data:
             inmet_ok += 1
-            for record in raw_data[-6:]:
+            # INMET retorna ate ~48 obs (2 dias) por query. Pegar tudo e
+            # deixar UNIQUE dedupar, em vez de [-6:] que deixava gaps quando
+            # cron atrasava mais que 6h.
+            for record in raw_data[-48:]:
                 parsed = parse_inmet_record(record, station_code, meta)
                 if parsed:
                     has_data = any([
