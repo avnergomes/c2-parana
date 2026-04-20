@@ -285,24 +285,50 @@ def login_infohidro(page) -> bool:
             print("  Sessao InfoHidro ja autenticada (redirect)")
             return True
 
-        page.wait_for_selector('input[type="text"], input[type="email"]', timeout=10000)
+        page.wait_for_selector('input', timeout=10000)
 
-        email_input = page.query_selector('input[type="text"], input[type="email"]')
+        # Diagnostico: lista todos os inputs disponiveis para entender o form
+        inputs_meta = page.evaluate(
+            "() => Array.from(document.querySelectorAll('input')).map(i => ({"
+            "  type: i.type, name: i.name, id: i.id, placeholder: i.placeholder,"
+            "  ariaLabel: i.getAttribute('aria-label'), visible: i.offsetParent !== null"
+            "}))"
+        )
+        print(f"  [debug] inputs encontrados ({len(inputs_meta)}): {inputs_meta}")
+
+        # Tenta achar email/usuario por multiplos seletores (nao confia em type=email)
+        email_sel = (
+            'input[type="email"], input[type="text"], '
+            'input[name*="email" i], input[name*="user" i], input[name*="login" i], '
+            'input[id*="email" i], input[id*="user" i], input[id*="login" i], '
+            'input[placeholder*="email" i], input[placeholder*="usuario" i]'
+        )
+        email_input = page.query_selector(email_sel)
         if email_input:
             email_input.fill(INFOHIDRO_USER)
+        else:
+            print("  Erro login InfoHidro: campo email/usuario nao encontrado")
+            return False
 
-        pass_input = page.query_selector('input[type="password"]')
+        # Senha pode ter type custom; tenta password puro depois fallback por nome/id
+        pass_sel = (
+            'input[type="password"], '
+            'input[name*="senha" i], input[name*="pass" i], '
+            'input[id*="senha" i], input[id*="pass" i]'
+        )
+        pass_input = page.query_selector(pass_sel)
         if pass_input:
             pass_input.fill(INFOHIDRO_PASS)
+        else:
+            print("  Erro login InfoHidro: campo senha nao encontrado")
+            return False
 
-        login_btn = page.query_selector('button[type="submit"], button:has-text("Entrar"), button:has-text("Login")')
+        btn_sel = 'button[type="submit"], button:has-text("Entrar"), button:has-text("Login"), input[type="submit"]'
+        login_btn = page.query_selector(btn_sel)
         if login_btn:
             login_btn.click()
-        elif pass_input:
-            pass_input.press("Enter")
         else:
-            print("  Erro login InfoHidro: campos do formulario nao encontrados")
-            return False
+            pass_input.press("Enter")
 
         # Espera redirect para QUALQUER rota pos-login (Home/Monitoring/raiz)
         # ou no minimo o JWT aparecer no Vuex Authentication.
