@@ -36,9 +36,11 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY")
 
-# BBox costa PR + aproximacao maritima de Paranagua/Antonina + canal de acesso.
+# BBox costa PR + aproximacao Atlantica (cobertura AIS volunter-fed e
+# esparsa ao sul do Brasil; ampliamos pra capturar trafego em transito
+# alem da janela imediata de Paranagua/Antonina).
 # Formato AISStream: [[ [latS, lonW], [latN, lonE] ]]
-PR_MARITIME_BBOX = [[[-26.5, -49.0], [-25.0, -47.5]]]
+PR_MARITIME_BBOX = [[[-27.5, -49.0], [-23.5, -45.0]]]
 
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
 LISTEN_SECONDS = 75
