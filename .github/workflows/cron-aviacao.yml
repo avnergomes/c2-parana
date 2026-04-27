@@ -1,7 +1,8 @@
 # .github/workflows/cron-aviacao.yml
-# Trafego aereo (OpenSky Network) a cada 5min.
+# Trafego aereo (airplanes.live) a cada 5min.
+# API publica, sem auth, rate limit 1 req/s — cron 5min usa 288 reqs/dia.
 # Budget: ~3min/dia (288 exec * ~30s).
-name: ETL Aviacao (OpenSky)
+name: ETL Aviacao (airplanes.live)
 
 on:
   schedule:
@@ -32,6 +33,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          OPENSKY_USERNAME: ${{ secrets.OPENSKY_USERNAME }}
-          OPENSKY_PASSWORD: ${{ secrets.OPENSKY_PASSWORD }}
         run: python scripts/etl_aviacao.py

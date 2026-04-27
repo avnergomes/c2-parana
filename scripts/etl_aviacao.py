@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""ETL Aviacao: OpenSky Network REST API -> aviation_traffic.
+"""ETL Aviacao: airplanes.live REST -> aviation_traffic.
 
-Poll do endpoint /states/all com BBox do Parana. Conta gratuita registrada
-expoe 4000 creditos/dia; uma chamada de BBox pequeno custa 1 credito, entao
-cron de 5 min = 288 polls/dia, com 14x folga.
+airplanes.live e um agregador comunitario de feeders ADS-B (mesma fonte
+que adsbexchange usava). API publica, gratis, sem auth, sem registro.
 
-Sem credenciais cai em modo anonimo (400 creditos/dia, ~1 poll a cada 4 min).
+Endpoint /v2/point/{lat}/{lon}/{radius_nm} retorna ate 1000 aeronaves
+em raio NM. Para cobrir o Parana (~600x500 km) usamos centro -24.89,
+-51.55 e raio 250 NM (~463 km), com folga ate as bordas.
+
+Rate limit: 1 req/segundo. Cron 5min = ~288 reqs/dia, sem pressao.
+Termos: nao comercial / situational awareness publico OK com User-Agent.
 """
 
 from __future__ import annotations
@@ -27,30 +31,21 @@ log = logging.getLogger("etl_aviacao")
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-OPENSKY_USERNAME = os.environ.get("OPENSKY_USERNAME") or None
-OPENSKY_PASSWORD = os.environ.get("OPENSKY_PASSWORD") or None
 
-# BBox Parana (lamin, lamax, lomin, lomax conforme OpenSky)
-LAMIN, LAMAX, LOMIN, LOMAX = -27.0, -22.5, -54.5, -48.0
-OPENSKY_URL = "https://opensky-network.org/api/states/all"
+# Centroide do PR + raio que cobre todo o estado com folga (250 NM ~ 463 km)
+PR_CENTER_LAT = -24.89
+PR_CENTER_LON = -51.55
+RADIUS_NM = 250
 
-# Indices dos campos no array de states (ordem documentada pela OpenSky).
-# https://openskynetwork.github.io/opensky-api/rest.html#all-state-vectors
-F_ICAO24 = 0
-F_CALLSIGN = 1
-F_ORIGIN_COUNTRY = 2
-F_TIME_POSITION = 3
-F_LAST_CONTACT = 4
-F_LONGITUDE = 5
-F_LATITUDE = 6
-F_BARO_ALTITUDE = 7
-F_ON_GROUND = 8
-F_VELOCITY = 9
-F_TRUE_TRACK = 10
-F_VERTICAL_RATE = 11
-F_GEO_ALTITUDE = 13
-F_SQUAWK = 14
-F_CATEGORY = 17
+AIRPLANES_LIVE_URL = (
+    f"https://api.airplanes.live/v2/point/{PR_CENTER_LAT}/{PR_CENTER_LON}/{RADIUS_NM}"
+)
+USER_AGENT = "c2-parana/1.0 (+https://github.com/avnergomes/c2-parana)"
+
+# Conversoes
+FT_TO_M = 0.3048
+KT_TO_MS = 0.514444
+FTMIN_TO_MS = 0.00508
 
 RETENTION_DAYS = 7
 
@@ -87,119 +82,134 @@ class AircraftState:
             "on_ground": self.on_ground,
             "squawk": self.squawk,
             "category": self.category,
-            "source": "opensky",
+            "source": "airplanes.live",
             "observed_at": self.observed_at,
         }
 
 
-def _parse_state(state: list[Any], snapshot_iso: str) -> AircraftState | None:
-    """Parseia um array de state vector. Retorna None se posicao invalida."""
+def _safe_float(value: Any) -> float | None:
     try:
-        icao24 = state[F_ICAO24]
-        lat = state[F_LATITUDE]
-        lon = state[F_LONGITUDE]
-        if icao24 is None or lat is None or lon is None:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_alt(value: Any) -> float | None:
+    """alt_baro/alt_geom podem vir como numero (ft) ou string 'ground'."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if value.lower() == "ground":
+            return 0.0
+        try:
+            return float(value) * FT_TO_M
+        except ValueError:
             return None
-
-        callsign_raw = state[F_CALLSIGN]
-        callsign = callsign_raw.strip() if isinstance(callsign_raw, str) else None
-        if callsign == "":
-            callsign = None
-
-        # observed_at: usa time_position se disponivel; senao snapshot do request
-        time_pos = state[F_TIME_POSITION]
-        if isinstance(time_pos, (int, float)):
-            observed_at = datetime.fromtimestamp(time_pos, tz=timezone.utc).isoformat()
-        else:
-            observed_at = snapshot_iso
-
-        return AircraftState(
-            icao24=str(icao24).strip().lower(),
-            callsign=callsign,
-            origin_country=state[F_ORIGIN_COUNTRY],
-            latitude=float(lat),
-            longitude=float(lon),
-            baro_altitude_m=_safe_float(state, F_BARO_ALTITUDE),
-            geo_altitude_m=_safe_float(state, F_GEO_ALTITUDE),
-            velocity_ms=_safe_float(state, F_VELOCITY),
-            true_track=_safe_float(state, F_TRUE_TRACK),
-            vertical_rate_ms=_safe_float(state, F_VERTICAL_RATE),
-            on_ground=bool(state[F_ON_GROUND]) if state[F_ON_GROUND] is not None else False,
-            squawk=state[F_SQUAWK] if isinstance(state[F_SQUAWK], str) else None,
-            category=_safe_int(state, F_CATEGORY),
-            observed_at=observed_at,
-        )
-    except (IndexError, TypeError, ValueError) as err:
-        log.debug("state malformado descartado: %s", err)
-        return None
-
-
-def _safe_float(state: list[Any], idx: int) -> float | None:
     try:
-        v = state[idx]
-        return float(v) if v is not None else None
-    except (IndexError, TypeError, ValueError):
+        return float(value) * FT_TO_M
+    except (TypeError, ValueError):
         return None
 
 
-def _safe_int(state: list[Any], idx: int) -> int | None:
-    try:
-        v = state[idx]
-        return int(v) if v is not None else None
-    except (IndexError, TypeError, ValueError):
+def _parse_category(raw: Any) -> int | None:
+    """airplanes.live retorna category como string tipo 'A1', 'A3'. Mapeamos para int 1-7."""
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and len(raw) >= 2 and raw[0].upper() == "A":
+        try:
+            return int(raw[1])
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_aircraft(record: dict[str, Any], snapshot_iso: str) -> AircraftState | None:
+    icao24 = record.get("hex")
+    lat = record.get("lat")
+    lon = record.get("lon")
+    if not icao24 or lat is None or lon is None:
         return None
 
+    callsign_raw = record.get("flight")
+    callsign = callsign_raw.strip() if isinstance(callsign_raw, str) else None
+    if callsign == "":
+        callsign = None
 
-def fetch_opensky() -> list[AircraftState]:
-    """Busca estado atual do trafego aereo no BBox PR com retry."""
-    params = {"lamin": LAMIN, "lamax": LAMAX, "lomin": LOMIN, "lomax": LOMAX}
-    auth = (
-        (OPENSKY_USERNAME, OPENSKY_PASSWORD)
-        if OPENSKY_USERNAME and OPENSKY_PASSWORD
-        else None
+    alt_baro_raw = record.get("alt_baro")
+    on_ground = (
+        isinstance(alt_baro_raw, str) and alt_baro_raw.lower() == "ground"
+    ) or bool(record.get("ground"))
+
+    # observed_at: se seen_pos disponivel, ajusta o snapshot pra tras
+    seen_pos = record.get("seen_pos")
+    if isinstance(seen_pos, (int, float)) and seen_pos < 60:
+        observed_dt = datetime.fromisoformat(snapshot_iso) - timedelta(seconds=int(seen_pos))
+        observed_at = observed_dt.isoformat()
+    else:
+        observed_at = snapshot_iso
+
+    velocity_kt = _safe_float(record.get("gs"))
+    velocity_ms = velocity_kt * KT_TO_MS if velocity_kt is not None else None
+
+    vrate_ftmin = _safe_float(record.get("baro_rate") or record.get("geom_rate"))
+    vertical_rate_ms = vrate_ftmin * FTMIN_TO_MS if vrate_ftmin is not None else None
+
+    return AircraftState(
+        icao24=str(icao24).strip().lower(),
+        callsign=callsign,
+        origin_country=record.get("r"),  # registration prefix, se disponivel
+        latitude=float(lat),
+        longitude=float(lon),
+        baro_altitude_m=_parse_alt(alt_baro_raw),
+        geo_altitude_m=_parse_alt(record.get("alt_geom")),
+        velocity_ms=velocity_ms,
+        true_track=_safe_float(record.get("track")),
+        vertical_rate_ms=vertical_rate_ms,
+        on_ground=on_ground,
+        squawk=str(record.get("squawk")) if record.get("squawk") is not None else None,
+        category=_parse_category(record.get("category")),
+        observed_at=observed_at,
     )
-    if not auth:
-        log.warning("OPENSKY_USERNAME/PASSWORD nao configurados — modo anonimo (400 creditos/dia)")
+
+
+def fetch_airplanes_live() -> list[AircraftState]:
+    """Busca aeronaves no raio do centroide PR com retry exponencial."""
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
 
     base_delay = 2
     for attempt in range(3):
         try:
-            resp = requests.get(OPENSKY_URL, params=params, auth=auth, timeout=30)
+            resp = requests.get(AIRPLANES_LIVE_URL, headers=headers, timeout=30)
         except requests.RequestException as err:
-            log.warning("OpenSky request falhou (tentativa %d): %s", attempt + 1, err)
+            log.warning("airplanes.live request falhou (tentativa %d): %s", attempt + 1, err)
             time.sleep(base_delay * (2**attempt))
             continue
 
         if resp.status_code == 429:
-            retry_after = int(resp.headers.get("X-Rate-Limit-Retry-After-Seconds", "60"))
-            log.warning("OpenSky rate limit; retry em %ds", retry_after)
-            time.sleep(min(retry_after, 120))
+            log.warning("rate limited; backoff %ds", base_delay * (2**attempt))
+            time.sleep(base_delay * (2**attempt))
             continue
 
         if resp.status_code >= 500:
-            log.warning("OpenSky %d (tentativa %d)", resp.status_code, attempt + 1)
+            log.warning("airplanes.live %d (tentativa %d)", resp.status_code, attempt + 1)
             time.sleep(base_delay * (2**attempt))
             continue
 
         resp.raise_for_status()
         payload = resp.json()
-        snapshot_unix = payload.get("time")
-        snapshot_iso = (
-            datetime.fromtimestamp(snapshot_unix, tz=timezone.utc).isoformat()
-            if isinstance(snapshot_unix, (int, float))
-            else datetime.now(tz=timezone.utc).isoformat()
-        )
-        states = payload.get("states") or []
-        parsed = [s for s in (_parse_state(st, snapshot_iso) for st in states) if s]
-        log.info("OpenSky: %d aeronaves recebidas, %d validas", len(states), len(parsed))
+        snapshot_iso = datetime.now(tz=timezone.utc).isoformat()
+        ac_list = payload.get("ac") or []
+        parsed = [a for a in (_parse_aircraft(rec, snapshot_iso) for rec in ac_list) if a]
+        log.info("airplanes.live: %d aeronaves recebidas, %d validas", len(ac_list), len(parsed))
         return parsed
 
-    log.error("OpenSky falhou apos 3 tentativas")
+    log.error("airplanes.live falhou apos 3 tentativas")
     return []
 
 
 def _truncate_to_minute(iso_string: str) -> str:
-    """Trunca ISO8601 ao minuto para evitar dedup excessivo (UNIQUE icao24+observed_at)."""
     dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
     return dt.replace(second=0, microsecond=0).isoformat()
 
@@ -208,7 +218,9 @@ def _dedupe_by_minute(states: list[AircraftState]) -> list[AircraftState]:
     seen: dict[tuple[str, str], AircraftState] = {}
     for s in states:
         key = (s.icao24, _truncate_to_minute(s.observed_at))
-        seen[key] = AircraftState(**{**s.__dict__, "observed_at": _truncate_to_minute(s.observed_at)})
+        seen[key] = AircraftState(
+            **{**s.__dict__, "observed_at": _truncate_to_minute(s.observed_at)}
+        )
     return list(seen.values())
 
 
@@ -240,7 +252,16 @@ def purge_old(supabase: Any) -> None:
         log.warning("purge falhou: %s", err)
 
 
-def record_health(supabase: Any, *, status: str, total: int, inserted: int, skipped: int, errors: int, duration_s: float) -> None:
+def record_health(
+    supabase: Any,
+    *,
+    status: str,
+    total: int,
+    inserted: int,
+    skipped: int,
+    errors: int,
+    duration_s: float,
+) -> None:
     try:
         supabase.table("data_cache").upsert(
             {
@@ -253,6 +274,7 @@ def record_health(supabase: Any, *, status: str, total: int, inserted: int, skip
                     "skipped_dup": skipped,
                     "errors": errors,
                     "duration_seconds": duration_s,
+                    "source": "airplanes.live",
                 },
                 "source": "etl_aviacao",
                 "fetched_at": datetime.now(tz=timezone.utc).isoformat(),
@@ -267,7 +289,7 @@ def main() -> None:
     start = time.time()
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    states = fetch_opensky()
+    states = fetch_airplanes_live()
     if not states:
         record_health(
             supabase,
@@ -278,7 +300,7 @@ def main() -> None:
             errors=0,
             duration_s=time.time() - start,
         )
-        log.info("nenhuma aeronave detectada no BBox PR (pode ser noite/clima)")
+        log.info("nenhuma aeronave detectada (pode ser noite/clima/upstream)")
         return
 
     deduped = _dedupe_by_minute(states)
