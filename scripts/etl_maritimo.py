@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -27,6 +28,11 @@ from typing import Any
 import websockets
 from dotenv import load_dotenv
 from supabase import create_client
+
+# Go-style time string: "2026-04-27 19:57:34.495808621 +0000 UTC"
+_GO_TIME_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?\s*([+-]\d{4})?(?:\s+\w+)?$"
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -159,8 +165,28 @@ class VesselSnapshot:
         }
 
 
-def _truncate_to_minute(iso_string: str) -> str:
-    dt = datetime.fromisoformat(iso_string.replace("Z", "+00:00"))
+def _parse_ais_time(value: str) -> datetime:
+    """Aceita ISO8601 ou Go default time format (que AISStream usa em time_utc)."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        pass
+
+    match = _GO_TIME_RE.match(value.strip())
+    if not match:
+        raise ValueError(f"Cannot parse AIS time: {value!r}")
+
+    date_part, time_part, frac, offset = match.groups()
+    # Python datetime suporta no maximo 6 digitos (microseconds); Go envia 9 (nanoseconds)
+    if frac:
+        frac = (frac + "000000")[:6]
+        time_part = f"{time_part}.{frac}"
+    offset_iso = f"{offset[:3]}:{offset[3:]}" if offset else "+00:00"
+    return datetime.fromisoformat(f"{date_part}T{time_part}{offset_iso}")
+
+
+def _truncate_to_minute(time_str: str) -> str:
+    dt = _parse_ais_time(time_str)
     return dt.replace(second=0, microsecond=0).isoformat()
 
 
