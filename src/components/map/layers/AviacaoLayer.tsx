@@ -17,9 +17,9 @@ interface AviacaoLayerProps {
   timeFilter?: string
 }
 
-// Tick rapido pra animacao client-side. A cada 2.5s recomputa posicao
+// Tick rapido pra animacao client-side. A cada 1.5s recomputa posicao
 // interpolada de cada aeronave a partir da ultima leitura + velocidade.
-const ANIMATION_TICK_MS = 2500
+const ANIMATION_TICK_MS = 1500
 // Janela de rastro: 2/3 dos pontos historicos (ate 1h) por aeronave.
 const TRAIL_KEEP_FRACTION = 2 / 3
 
@@ -114,9 +114,9 @@ export function AviacaoLayer({ timeFilter }: AviacaoLayerProps) {
             positions={positions}
             pathOptions={{
               color,
-              weight: 1.5,
-              opacity: 0.45,
-              dashArray: '4 4',
+              weight: 2,
+              opacity: 0.65,
+              dashArray: '6 4',
             }}
           />
         )
