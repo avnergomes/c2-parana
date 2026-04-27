@@ -4,19 +4,23 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import type { AviationTraffic, MaritimeTraffic } from '@/types/trafego'
 
-const SNAPSHOT_WINDOW_MIN = 10
+// Janelas amplas para sobreviver ao jitter do cron do GitHub Actions
+// (que pode atrasar agendamentos em 5–20min sob carga). Sem isso, a layer
+// fica visualmente vazia entre uma run e a proxima.
+const AVIATION_SNAPSHOT_WINDOW_MIN = 30
+const MARITIME_SNAPSHOT_WINDOW_MIN = 60
 const HISTORY_WINDOW_HOURS = 1
 
 function _isoMinutesAgo(min: number): string {
   return new Date(Date.now() - min * 60 * 1000).toISOString()
 }
 
-/** Snapshot mais recente: ultima leitura por icao24 nos ultimos 10min. */
+/** Snapshot mais recente: ultima leitura por icao24 nos ultimos 30min. */
 export function useAviationTraffic() {
   return useQuery({
     queryKey: ['aviation-traffic-snapshot'],
     queryFn: async () => {
-      const since = _isoMinutesAgo(SNAPSHOT_WINDOW_MIN)
+      const since = _isoMinutesAgo(AVIATION_SNAPSHOT_WINDOW_MIN)
       const { data, error } = (await supabase
         .from('aviation_traffic' as never)
         .select(
@@ -64,12 +68,12 @@ export function useAviationHistory(hours = HISTORY_WINDOW_HOURS) {
   })
 }
 
-/** Snapshot maritimo: ultima leitura por mmsi nos ultimos 30min. */
+/** Snapshot maritimo: ultima leitura por mmsi nos ultimos 60min. */
 export function useMaritimeTraffic() {
   return useQuery({
     queryKey: ['maritime-traffic-snapshot'],
     queryFn: async () => {
-      const since = _isoMinutesAgo(30)
+      const since = _isoMinutesAgo(MARITIME_SNAPSHOT_WINDOW_MIN)
       const { data, error } = (await supabase
         .from('maritime_traffic' as never)
         .select(
