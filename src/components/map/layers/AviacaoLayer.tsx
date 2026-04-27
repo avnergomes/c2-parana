@@ -1,19 +1,27 @@
 // src/components/map/layers/AviacaoLayer.tsx
-import { useMemo } from 'react'
-import { Marker, Tooltip } from 'react-leaflet'
+import { useEffect, useMemo, useState } from 'react'
+import { Marker, Polyline, Tooltip } from 'react-leaflet'
 import L from 'leaflet'
-import { useAviationTraffic } from '@/hooks/useTrafego'
+import { useAviationTraffic, useAviationHistory } from '@/hooks/useTrafego'
 import {
   AVIATION_COLORS,
   aviationCategory,
   speedKmh,
   altitudeFt,
   altitudeFL,
+  interpolatePosition,
 } from '@/types/trafego'
+import type { AviationTraffic } from '@/types/trafego'
 
 interface AviacaoLayerProps {
   timeFilter?: string
 }
+
+// Tick rapido pra animacao client-side. A cada 2.5s recomputa posicao
+// interpolada de cada aeronave a partir da ultima leitura + velocidade.
+const ANIMATION_TICK_MS = 2500
+// Janela de rastro: 2/3 dos pontos historicos (ate 1h) por aeronave.
+const TRAIL_KEEP_FRACTION = 2 / 3
 
 function buildAircraftIcon(rotation: number, color: string, onGround: boolean): L.DivIcon {
   const opacity = onGround ? 0.55 : 1
@@ -31,19 +39,99 @@ function buildAircraftIcon(rotation: number, color: string, onGround: boolean): 
   })
 }
 
+/** Tick state que avanca a cada N ms para forcar re-render dos markers. */
+function useTickingTime(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
+}
+
 export function AviacaoLayer({ timeFilter }: AviacaoLayerProps) {
   const { data: aircraft } = useAviationTraffic()
+  const { data: history } = useAviationHistory(1)
+  const now = useTickingTime(ANIMATION_TICK_MS)
 
-  const filtered = useMemo(() => {
+  // Snapshot filtrado pela timeline (se ativa)
+  const filtered = useMemo<AviationTraffic[]>(() => {
     if (!aircraft) return []
     if (!timeFilter) return aircraft
     const cutoff = new Date(timeFilter).getTime()
     return aircraft.filter((a) => new Date(a.observed_at).getTime() <= cutoff)
   }, [aircraft, timeFilter])
 
+  // Trails: para cada icao24 ativo, lat/lon dos ultimos 2/3 dos pontos
+  // historicos ordenados por tempo. Polyline conecta esses pontos.
+  const trails = useMemo<Map<string, [number, number][]>>(() => {
+    const out = new Map<string, [number, number][]>()
+    if (!history || !filtered.length) return out
+    const activeIcaos = new Set(filtered.map((a) => a.icao24))
+    const grouped = new Map<string, AviationTraffic[]>()
+    for (const p of history) {
+      if (!activeIcaos.has(p.icao24)) continue
+      const arr = grouped.get(p.icao24)
+      if (arr) arr.push(p)
+      else grouped.set(p.icao24, [p])
+    }
+    for (const [icao24, pts] of grouped) {
+      pts.sort(
+        (a, b) => new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime(),
+      )
+      // Mantem 2/3 finais (rastro recente)
+      const start = Math.floor(pts.length * (1 - TRAIL_KEEP_FRACTION))
+      const slice = pts.slice(start)
+      if (slice.length >= 2) {
+        out.set(
+          icao24,
+          slice.map((p) => [p.latitude, p.longitude]),
+        )
+      }
+    }
+    return out
+  }, [history, filtered])
+
   return (
     <>
+      {/* Rastros (Polyline) por aeronave — desenhados antes pra ficar atras */}
       {filtered.map((a) => {
+        const trail = trails.get(a.icao24)
+        if (!trail || trail.length < 2) return null
+        const cat = aviationCategory(a.baro_altitude_m, a.on_ground)
+        const color = AVIATION_COLORS[cat]
+        // Inclui posicao atual interpolada como ponto final do rastro
+        const headLat = a.latitude
+        const headLon = a.longitude
+        const last = trail[trail.length - 1]
+        const positions: [number, number][] =
+          last[0] === headLat && last[1] === headLon
+            ? trail
+            : [...trail, [headLat, headLon]]
+        return (
+          <Polyline
+            key={`trail-${a.icao24}`}
+            positions={positions}
+            pathOptions={{
+              color,
+              weight: 1.5,
+              opacity: 0.45,
+              dashArray: '4 4',
+            }}
+          />
+        )
+      })}
+
+      {/* Markers com posicao interpolada */}
+      {filtered.map((a) => {
+        const [lat, lon] = interpolatePosition(
+          a.latitude,
+          a.longitude,
+          a.velocity_ms,
+          a.true_track,
+          a.observed_at,
+          now,
+        )
         const cat = aviationCategory(a.baro_altitude_m, a.on_ground)
         const color = AVIATION_COLORS[cat]
         const rot = a.true_track ?? 0
@@ -51,14 +139,19 @@ export function AviacaoLayer({ timeFilter }: AviacaoLayerProps) {
         const fl = altitudeFL(a.baro_altitude_m ?? a.geo_altitude_m)
 
         return (
-          <Marker key={`acft-${a.icao24}`} position={[a.latitude, a.longitude]} icon={icon}>
+          <Marker key={`acft-${a.icao24}`} position={[lat, lon]} icon={icon}>
             <Tooltip direction="top" offset={[0, -8]} className="map-tooltip">
               <div style={{ minWidth: 160 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
                   {a.callsign || a.icao24.toUpperCase()}
                   {fl && (
                     <span
-                      style={{ marginLeft: 6, fontFamily: 'monospace', color: '#9ca3af', fontWeight: 500 }}
+                      style={{
+                        marginLeft: 6,
+                        fontFamily: 'monospace',
+                        color: '#9ca3af',
+                        fontWeight: 500,
+                      }}
                     >
                       {fl}
                     </span>

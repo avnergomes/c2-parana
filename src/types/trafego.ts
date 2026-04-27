@@ -118,3 +118,41 @@ export function altitudeFL(m: number | null): string | null {
   if (fl < 5) return null
   return `FL${fl.toFixed(0).padStart(3, '0')}`
 }
+
+// ---- Interpolacao client-side: avioes "voam" entre snapshots do cron ----
+
+const METERS_PER_DEG_LAT = 111320
+// Cap maximo de extrapolacao em segundos. Alem disso, posicao trava na
+// ultima conhecida — evita avioes flutuando 50km off quando data e stale.
+const INTERP_CAP_SECONDS = 600
+
+/**
+ * Estima posicao atual de uma aeronave dada a ultima leitura conhecida,
+ * velocidade e heading. Usa formulacao plana (small-angle approx) — ok
+ * para janelas de ate ~10min em qualquer latitude.
+ */
+export function interpolatePosition(
+  baseLat: number,
+  baseLon: number,
+  velocityMs: number | null,
+  trueTrack: number | null,
+  observedAt: string,
+  now: number,
+): [number, number] {
+  if (velocityMs === null || velocityMs === undefined) return [baseLat, baseLon]
+  if (trueTrack === null || trueTrack === undefined) return [baseLat, baseLon]
+
+  const elapsedS = (now - new Date(observedAt).getTime()) / 1000
+  if (elapsedS <= 0) return [baseLat, baseLon]
+  const tCapped = Math.min(elapsedS, INTERP_CAP_SECONDS)
+
+  const bearingRad = (trueTrack * Math.PI) / 180
+  const distM = velocityMs * tCapped
+  const northM = distM * Math.cos(bearingRad)
+  const eastM = distM * Math.sin(bearingRad)
+
+  const dLat = northM / METERS_PER_DEG_LAT
+  const dLon = eastM / (METERS_PER_DEG_LAT * Math.cos((baseLat * Math.PI) / 180))
+
+  return [baseLat + dLat, baseLon + dLon]
+}

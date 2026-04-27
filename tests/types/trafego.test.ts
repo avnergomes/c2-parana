@@ -9,6 +9,7 @@ import {
   AVIATION_COLORS,
   VESSEL_COLORS,
   VESSEL_LABELS,
+  interpolatePosition,
 } from '@/types/trafego'
 
 describe('aviationCategory', () => {
@@ -84,6 +85,56 @@ describe('altitudeFL', () => {
   it('returns null for low altitude or null input', () => {
     expect(altitudeFL(null)).toBeNull()
     expect(altitudeFL(100)).toBeNull()
+  })
+})
+
+describe('interpolatePosition', () => {
+  const baseLat = -25.0
+  const baseLon = -50.0
+  const observed = '2026-04-27T22:00:00Z'
+  const observedMs = new Date(observed).getTime()
+
+  it('returns base position when elapsed time is zero', () => {
+    const [lat, lon] = interpolatePosition(baseLat, baseLon, 200, 0, observed, observedMs)
+    expect(lat).toBeCloseTo(baseLat, 6)
+    expect(lon).toBeCloseTo(baseLon, 6)
+  })
+
+  it('returns base position when velocity is null', () => {
+    const [lat, lon] = interpolatePosition(baseLat, baseLon, null, 90, observed, observedMs + 60_000)
+    expect(lat).toBe(baseLat)
+    expect(lon).toBe(baseLon)
+  })
+
+  it('returns base position when track is null', () => {
+    const [lat, lon] = interpolatePosition(baseLat, baseLon, 200, null, observed, observedMs + 60_000)
+    expect(lat).toBe(baseLat)
+    expect(lon).toBe(baseLon)
+  })
+
+  it('moves north when bearing is 0 (lat increases)', () => {
+    // 100 m/s north for 60s = 6000m = ~0.054 deg lat
+    const [lat, lon] = interpolatePosition(baseLat, baseLon, 100, 0, observed, observedMs + 60_000)
+    expect(lat).toBeGreaterThan(baseLat)
+    expect(lon).toBeCloseTo(baseLon, 6)
+  })
+
+  it('moves east when bearing is 90 (lon increases)', () => {
+    const [lat, lon] = interpolatePosition(baseLat, baseLon, 100, 90, observed, observedMs + 60_000)
+    expect(lat).toBeCloseTo(baseLat, 6)
+    expect(lon).toBeGreaterThan(baseLon)
+  })
+
+  it('caps extrapolation at 10min to avoid wild estimates', () => {
+    const [lat10min] = interpolatePosition(baseLat, baseLon, 100, 0, observed, observedMs + 600_000)
+    const [lat30min] = interpolatePosition(baseLat, baseLon, 100, 0, observed, observedMs + 1_800_000)
+    expect(lat30min).toBeCloseTo(lat10min, 6)
+  })
+
+  it('returns base position when observation is in the future', () => {
+    const [lat, lon] = interpolatePosition(baseLat, baseLon, 100, 90, observed, observedMs - 10_000)
+    expect(lat).toBe(baseLat)
+    expect(lon).toBe(baseLon)
   })
 })
 
