@@ -10,8 +10,11 @@ import {
   Wind,
   AlertTriangle,
   Shield,
+  Plane,
+  Ship,
 } from 'lucide-react'
 import { useCOP } from '@/hooks/useCOP'
+import { useTrafegoStats } from '@/hooks/useTrafego'
 
 interface COPStatusPanelProps {
   onMunicipalityClick?: (ibgeCode: string) => void
@@ -45,6 +48,7 @@ export function COPStatusPanel({ onMunicipalityClick: _onMunicipalityClick }: CO
     extremeTemperature,
     lastUpdate,
   } = useCOP()
+  const trafego = useTrafegoStats()
 
   const inmetBySeverity = useMemo((): SeverityCount => {
     const counts = { critical: 0, high: 0, medium: 0, low: 0 }
@@ -314,6 +318,38 @@ export function COPStatusPanel({ onMunicipalityClick: _onMunicipalityClick }: CO
                     {extremeTemperature?.max !== undefined
                       ? `${extremeTemperature.max.toFixed(1)}°C`
                       : '--'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Aeronaves no PR */}
+              <div className="bg-gray-800/50 rounded px-3 py-2 flex items-start gap-2">
+                <Plane size={14} className="text-sky-400 mt-1 flex-shrink-0" />
+                <div>
+                  <div className="text-xs text-secondary">Aeronaves</div>
+                  <div className="text-sm font-bold text-primary">
+                    {trafego.aircraftCount}
+                    {trafego.aircraftAirborne > 0 && (
+                      <span className="text-9px text-secondary ml-1">
+                        ({trafego.aircraftAirborne} no ar)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Navios costa PR */}
+              <div className="bg-gray-800/50 rounded px-3 py-2 flex items-start gap-2">
+                <Ship size={14} className="text-emerald-400 mt-1 flex-shrink-0" />
+                <div>
+                  <div className="text-xs text-secondary">Navios</div>
+                  <div className="text-sm font-bold text-primary">
+                    {trafego.vesselCount}
+                    {trafego.vesselsParanagua > 0 && (
+                      <span className="text-9px text-secondary ml-1">
+                        ({trafego.vesselsParanagua} Pgua)
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

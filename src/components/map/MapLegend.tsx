@@ -21,7 +21,7 @@ interface MapLegendProps {
 
 export function MapLegend({ activeLayers }: MapLegendProps) {
   const hasAny = activeLayers.some(l =>
-    ['dengue', 'vbp', 'credito', 'reservatorios', 'clima', 'queimadas'].includes(l)
+    ['dengue', 'vbp', 'credito', 'reservatorios', 'clima', 'queimadas', 'aviacao', 'maritimo'].includes(l)
   )
   if (!hasAny) return null
 
@@ -97,6 +97,43 @@ export function MapLegend({ activeLayers }: MapLegendProps) {
             <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#ef4444', opacity: 1 }} />
             <span className="text-2xs text-text-muted ml-1">Intensidade</span>
           </div>
+        </div>
+      )}
+
+      {activeLayers.includes('aviacao') && (
+        <div>
+          <p className="text-2xs text-text-muted uppercase tracking-wider font-semibold mb-1.5">Aviação</p>
+          {[
+            { color: '#fbbf24', label: '< 5k ft' },
+            { color: '#34d399', label: '5–16k ft' },
+            { color: '#60a5fa', label: '16–30k ft' },
+            { color: '#a78bfa', label: '> 30k ft (cruzeiro)' },
+            { color: '#6b7280', label: 'Em solo' },
+          ].map(item => (
+            <div key={item.label} className="flex items-center gap-2 mb-0.5">
+              <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: item.color }} />
+              <span className="text-2xs text-text-secondary">{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeLayers.includes('maritimo') && (
+        <div>
+          <p className="text-2xs text-text-muted uppercase tracking-wider font-semibold mb-1.5">Marítimo</p>
+          {[
+            { color: '#10b981', label: 'Carga' },
+            { color: '#f97316', label: 'Petroleiro' },
+            { color: '#60a5fa', label: 'Passageiros' },
+            { color: '#fbbf24', label: 'Pesca' },
+            { color: '#a78bfa', label: 'Rebocador' },
+            { color: '#94a3b8', label: 'Outros' },
+          ].map(item => (
+            <div key={item.label} className="flex items-center gap-2 mb-0.5">
+              <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: item.color }} />
+              <span className="text-2xs text-text-secondary">{item.label}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>

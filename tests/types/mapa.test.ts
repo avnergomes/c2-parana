@@ -3,8 +3,15 @@ import { describe, it, expect } from 'vitest'
 import { LAYER_CONFIGS } from '@/types/mapa'
 
 describe('LAYER_CONFIGS', () => {
-  it('has 9 map layers', () => {
-    expect(LAYER_CONFIGS).toHaveLength(9)
+  it('has 11 map layers', () => {
+    expect(LAYER_CONFIGS).toHaveLength(11)
+  })
+
+  it('includes aviacao and maritimo as pro plan layers', () => {
+    const aviacao = LAYER_CONFIGS.find(l => l.id === 'aviacao')
+    const maritimo = LAYER_CONFIGS.find(l => l.id === 'maritimo')
+    expect(aviacao?.plan).toBe('pro')
+    expect(maritimo?.plan).toBe('pro')
   })
 
   it('includes reservatorios as pro plan layer', () => {

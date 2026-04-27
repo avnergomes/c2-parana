@@ -18,6 +18,8 @@ import { RiosLayer } from './layers/RiosLayer'
 import { ReservatoriosLayer } from './layers/ReservatoriosLayer'
 import { ManancialAlertsLayer } from './layers/ManancialAlertsLayer'
 import { AtendimentosGlowLayer } from './layers/AtendimentosGlowLayer'
+import { AviacaoLayer } from './layers/AviacaoLayer'
+import { MaritimoLayer } from './layers/MaritimoLayer'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { MapDataProvider } from '@/contexts/MapDataContext'
 import type { GeoJsonObject, Feature } from 'geojson'
@@ -240,6 +242,20 @@ export function MapModule() {
           {activeLayers.includes('irtc') && isPro && geoJSON && (
             <ErrorBoundary moduleName="layer irtc">
               <IRTCLayer />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Aviação (tráfego aéreo OpenSky) */}
+          {activeLayers.includes('aviacao') && isPro && (
+            <ErrorBoundary moduleName="layer aviacao">
+              <AviacaoLayer timeFilter={timelineValue} />
+            </ErrorBoundary>
+          )}
+
+          {/* Layer: Marítimo (tráfego AIS costa PR) */}
+          {activeLayers.includes('maritimo') && isPro && (
+            <ErrorBoundary moduleName="layer maritimo">
+              <MaritimoLayer timeFilter={timelineValue} />
             </ErrorBoundary>
           )}
         </LeafletMap>
