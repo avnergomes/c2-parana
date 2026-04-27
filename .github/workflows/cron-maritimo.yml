@@ -1,0 +1,36 @@
+# .github/workflows/cron-maritimo.yml
+# Trafego maritimo (AISStream.io) a cada 10min, janela de 75s por execucao.
+# Budget: ~24min/dia (144 exec * ~100s).
+name: ETL Maritimo (AISStream)
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: etl-maritimo
+  cancel-in-progress: false
+
+jobs:
+  etl-maritimo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependencias
+        run: pip install -r scripts/requirements.txt
+
+      - name: Executar ETL Maritimo
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+        run: python scripts/etl_maritimo.py
