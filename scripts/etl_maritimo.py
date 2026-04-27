@@ -49,7 +49,10 @@ AISSTREAM_API_KEY = os.environ.get("AISSTREAM_API_KEY")
 PR_MARITIME_BBOX = [[[-27.5, -49.0], [-23.5, -45.0]]]
 
 AISSTREAM_URL = "wss://stream.aisstream.io/v0/stream"
-LISTEN_SECONDS = 75
+# Janela maior captura mais navios (a transmissao AIS em vessels under way
+# e ~10s, mas em moored/anchored pode ser >3min). 120s captura quase todos
+# os ativos no BBox em um unico run.
+LISTEN_SECONDS = 120
 RETENTION_DAYS = 7
 
 # AIS ship type categorias (resumo do ITU-R M.1371)

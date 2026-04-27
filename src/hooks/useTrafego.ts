@@ -5,17 +5,21 @@ import { supabase } from '@/lib/supabase'
 import type { AviationTraffic, MaritimeTraffic } from '@/types/trafego'
 
 // Janelas amplas para sobreviver ao jitter do cron do GitHub Actions
-// (que pode atrasar agendamentos em 5–20min sob carga). Sem isso, a layer
-// fica visualmente vazia entre uma run e a proxima.
-const AVIATION_SNAPSHOT_WINDOW_MIN = 30
-const MARITIME_SNAPSHOT_WINDOW_MIN = 60
-const HISTORY_WINDOW_HOURS = 1
+// (que pode atrasar agendamentos em 30-90min — observado empiricamente
+// schedules de */5min rodando a cada 30-60min). Sem isso, a layer fica
+// visualmente vazia entre uma run e a proxima. Trafego maritimo e
+// suficientemente lento (kn) que mostrar posicoes ate 2h velhas e util
+// para situational awareness. Aviacao: avioes a 800 km/h se deslocam
+// muito em 60min, mas e a melhor relacao com a frequencia real de poll.
+const AVIATION_SNAPSHOT_WINDOW_MIN = 60
+const MARITIME_SNAPSHOT_WINDOW_MIN = 120
+const HISTORY_WINDOW_HOURS = 2
 
 function _isoMinutesAgo(min: number): string {
   return new Date(Date.now() - min * 60 * 1000).toISOString()
 }
 
-/** Snapshot mais recente: ultima leitura por icao24 nos ultimos 30min. */
+/** Snapshot mais recente: ultima leitura por icao24 nos ultimos 60min. */
 export function useAviationTraffic() {
   return useQuery({
     queryKey: ['aviation-traffic-snapshot'],
@@ -68,7 +72,7 @@ export function useAviationHistory(hours = HISTORY_WINDOW_HOURS) {
   })
 }
 
-/** Snapshot maritimo: ultima leitura por mmsi nos ultimos 60min. */
+/** Snapshot maritimo: ultima leitura por mmsi nos ultimos 120min. */
 export function useMaritimeTraffic() {
   return useQuery({
     queryKey: ['maritime-traffic-snapshot'],
