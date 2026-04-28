@@ -1,11 +1,10 @@
 # .github/workflows/cron-clima.yml
-# Budget: ~12 min/dia (24 exec × ~30s)
-# Fonte primária: INMET | Fallback: Open-Meteo
-name: ETL Clima (INMET + Open-Meteo)
+# DEPRECATED: ETL clima migrada para Supabase Edge Function + pg_cron
+# (15min). Ver supabase/functions/etl-clima/index.ts e migration
+# 032_etl_clima_pgcron.sql. Mantido apenas como backup manual.
+name: ETL Clima (BACKUP — usar etl-clima edge function)
 
 on:
-  schedule:
-    - cron: '0 * * * *'   # A cada hora (24 exec/dia)
   workflow_dispatch:
 
 env:
