@@ -125,10 +125,10 @@ describe('interpolatePosition', () => {
     expect(lon).toBeGreaterThan(baseLon)
   })
 
-  it('caps extrapolation at 10min to avoid wild estimates', () => {
-    const [lat10min] = interpolatePosition(baseLat, baseLon, 100, 0, observed, observedMs + 600_000)
-    const [lat30min] = interpolatePosition(baseLat, baseLon, 100, 0, observed, observedMs + 1_800_000)
-    expect(lat30min).toBeCloseTo(lat10min, 6)
+  it('caps extrapolation at 20min to avoid wild estimates', () => {
+    const [lat20min] = interpolatePosition(baseLat, baseLon, 100, 0, observed, observedMs + 1_200_000)
+    const [lat60min] = interpolatePosition(baseLat, baseLon, 100, 0, observed, observedMs + 3_600_000)
+    expect(lat60min).toBeCloseTo(lat20min, 6)
   })
 
   it('returns base position when observation is in the future', () => {

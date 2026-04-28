@@ -124,7 +124,8 @@ export function altitudeFL(m: number | null): string | null {
 const METERS_PER_DEG_LAT = 111320
 // Cap maximo de extrapolacao em segundos. Alem disso, posicao trava na
 // ultima conhecida — evita avioes flutuando 50km off quando data e stale.
-const INTERP_CAP_SECONDS = 600
+// 20min de tolerancia: cobre gaps tipicos do cron GH Actions free.
+const INTERP_CAP_SECONDS = 1200
 
 /**
  * Estima posicao atual de uma aeronave dada a ultima leitura conhecida,
