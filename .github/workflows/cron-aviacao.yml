@@ -1,17 +1,13 @@
 # .github/workflows/cron-aviacao.yml
-# Trafego aereo (airplanes.live) a cada 5min.
-# API publica, sem auth, rate limit 1 req/s — cron 5min usa 288 reqs/dia.
-# Budget: ~3min/dia (288 exec * ~30s).
-name: ETL Aviacao (airplanes.live)
+# DEPRECATED: ETL aviacao migrada para Supabase Edge Function +
+# pg_cron (a cada 1min). Veja supabase/functions/etl-aviacao/index.ts
+# e migration 031_etl_aviacao_pgcron.sql.
+#
+# Mantemos somente o trigger manual (workflow_dispatch) como backup
+# caso a function fique indisponivel.
+name: ETL Aviacao (BACKUP — usar etl-aviacao edge function)
 
 on:
-  schedule:
-    # Multiplos schedules offset para mitigar throttling do GH Actions free
-    # tier (que documenta minimo de 5min mas frequentemente skipa runs).
-    # Tres entradas offset dao ~1.67min efetivo se todas dispararem.
-    - cron: '*/5 * * * *'
-    - cron: '1-59/5 * * * *'
-    - cron: '3-59/5 * * * *'
   workflow_dispatch:
 
 concurrency:
