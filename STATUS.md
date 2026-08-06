@@ -1,6 +1,18 @@
-# C2 Paraná — Status de Implementação
+# DataGeo PR — Status de Implementação (ex-c2-parana)
 
-**Última atualização:** 2026-04-19
+**Última atualização:** 2026-05-19
+
+> **2026-05-19 — Pivô estratégico aplicado.** Repositionado de "C4ISR para Defesa
+> Civil" para **API + Console de Inteligência Territorial** (free + R$99 + R$399 +
+> Enterprise). Mantém 100% dos ETLs e do schema Supabase. Detalhes e racional em
+> [`docs/PIVOT.md`](./docs/PIVOT.md). Plumbing P0 concluído: referer gate removido,
+> tracking sem consent removido (LGPD), CORS multi-origem, singleton Stripe, ToS+PP,
+> migration 033 (`api_keys` + `api_usage` + `check_api_quota`), edge function
+> `public-api` com 5 endpoints v1. Pendente do usuário: criar prices no Stripe,
+> configurar secrets, deploy edge functions, mover hospedagem para domínio próprio
+> (`app.datageoparana.com.br`).
+
+**Última atualização anterior:** 2026-04-19
 **Substitui:** `c2-parana-prompts/`, `c2-parana-fix-prompts/`, `c2-parana-fix-prompts-v2/`, `PLANO_IMPLEMENTACAO_C4ISR.md`, `PLANO_FASE3.md`, `PLANO_FASE4.md`, `PLANO_FASE5.md`, `PLANO_CORRECAO.md` (todos consolidados aqui).
 
 **Também incorpora itens c2-parana de auditorias de ecossistema externas:**
