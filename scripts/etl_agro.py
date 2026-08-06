@@ -130,6 +130,7 @@ def fetch_vbp_sidra():
             "vbp_pecuaria_brl": total_valor * 1000 * 0.35,
             "variacao_yoy": 5.2,  # TODO: calcular com ano anterior
             "ano_referencia": ano,
+            "is_fallback": False,
         }
 
         vbp_municipios = [{
@@ -146,14 +147,20 @@ def fetch_vbp_sidra():
 
 
 def get_vbp_fallback():
-    """Dados fallback do VBP baseados em estatísticas oficiais."""
-    # Dados reais aproximados do VBP Paraná 2023
+    """Fallback VBP — usado quando SIDRA está indisponível.
+
+    Os números abaixo são APROXIMAÇÕES públicas (SEAB/IBGE 2023) e NÃO devem
+    ser exibidos ao usuário sem o badge "estimativa" — o frontend deve checar
+    a flag is_fallback antes de renderizar.
+    """
     vbp_kpis = {
-        "vbp_total_brl": 152_000_000_000,  # R$ 152 bi
+        "vbp_total_brl": 152_000_000_000,
         "vbp_lavoura_brl": 98_000_000_000,
         "vbp_pecuaria_brl": 54_000_000_000,
         "variacao_yoy": 3.8,
         "ano_referencia": "2023",
+        "is_fallback": True,
+        "fallback_source": "SEAB/IBGE 2023 — valor estimado, SIDRA indisponível",
     }
 
     vbp_municipios = [
