@@ -10,7 +10,7 @@ export function useCheckout() {
   const { user } = useAuth()
   const navigate = useNavigate()
 
-  const startCheckout = async (plan: 'solo' | 'pro') => {
+  const startCheckout = async (plan: 'starter' | 'pro') => {
     if (!user) {
       navigate('/login')
       return

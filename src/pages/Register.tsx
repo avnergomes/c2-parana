@@ -94,7 +94,9 @@ export function RegisterPage() {
 
           <p className="text-xs text-text-muted text-center mt-4">
             Ao criar sua conta, você concorda com os{' '}
-            <a href="#" className="text-accent-blue hover:underline">Termos de Uso</a>
+            <Link to="/legal/termos" className="text-accent-blue hover:underline">Termos de Uso</Link>
+            {' '}e a{' '}
+            <Link to="/legal/privacidade" className="text-accent-blue hover:underline">Política de Privacidade</Link>
           </p>
         </div>
 

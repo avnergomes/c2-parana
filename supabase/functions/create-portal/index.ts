@@ -3,14 +3,24 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import Stripe from 'https://esm.sh/stripe@14.15.0?target=deno'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
-const ALLOWED_ORIGIN = Deno.env.get('CORS_ORIGIN') || 'https://c2parana.com.br'
+const ALLOWED_ORIGINS = (Deno.env.get('CORS_ORIGINS') || Deno.env.get('CORS_ORIGIN') || '')
+  .split(',').map(s => s.trim()).filter(Boolean)
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get('Origin') || ''
+  const allow = ALLOWED_ORIGINS.length === 0
+    ? origin
+    : (ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0])
+  return {
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  }
 }
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }

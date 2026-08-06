@@ -1,48 +1,29 @@
 <!DOCTYPE html>
 <html lang="pt-BR" class="dark">
 <head>
-    <!-- Datageo Auth Referer Gate -->
-    <script>
-      (function () {
-        try {
-          var ALLOWED = ['datageoparana.github.io'];
-          var ROOT = 'https://datageoparana.github.io/';
-          var KEY = 'dg_dashboard_pass';
-          if (sessionStorage.getItem(KEY) === '1') return;
-          var refHost = '';
-          try { refHost = new URL(document.referrer || '').host; } catch (e) {}
-          if (refHost && (refHost === location.host || ALLOWED.indexOf(refHost) !== -1)) {
-            sessionStorage.setItem(KEY, '1');
-            return;
-          }
-          location.replace(ROOT + '?from=' + encodeURIComponent(location.host + location.pathname));
-        } catch (e) {}
-      })();
-    </script>
-
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <!-- SEO -->
-  <title>C2 Paraná — Inteligência Territorial</title>
-  <meta name="description" content="Dashboard de inteligência territorial do Paraná. Clima, agronegócio, saúde, meio ambiente, notícias e legislativo em tempo real." />
-  <meta name="keywords" content="Paraná, monitoramento, dashboard, clima, agronegócio, dengue, queimadas, inteligência territorial" />
-  <meta name="author" content="C2 Paraná" />
+  <title>DataGeo PR — API e Console de Inteligência Territorial do Paraná</title>
+  <meta name="description" content="API REST e console web com clima, agronegócio, saúde, queimadas, água, IRTC e alertas dos 399 municípios do Paraná. Free tier + planos a partir de R$99/mês." />
+  <meta name="keywords" content="Paraná, API, inteligência territorial, clima, agronegócio, dengue, queimadas, IRTC, dashboard, GeoJSON" />
+  <meta name="author" content="DataGeo PR" />
   <meta name="robots" content="index, follow" />
 
   <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://avnergomes.github.io/c2-parana/" />
-  <meta property="og:title" content="C2 Paraná — Inteligência Territorial" />
-  <meta property="og:description" content="Monitore o Paraná em tempo real: clima, agronegócio, saúde, meio ambiente e notícias." />
-  <meta property="og:image" content="https://avnergomes.github.io/c2-parana/og-image.svg" />
+  <meta property="og:url" content="https://app.datageoparana.com.br/" />
+  <meta property="og:title" content="DataGeo PR — Inteligência Territorial como serviço" />
+  <meta property="og:description" content="API + Console com dados consolidados de clima, agro, saúde, ambiente, água e legislativo para os 399 municípios do Paraná." />
+  <meta property="og:image" content="/og-image.svg" />
   <meta property="og:locale" content="pt_BR" />
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="C2 Paraná" />
-  <meta name="twitter:description" content="Inteligência territorial do Paraná em tempo real." />
-  <meta name="twitter:image" content="https://avnergomes.github.io/c2-parana/og-image.svg" />
+  <meta name="twitter:title" content="DataGeo PR" />
+  <meta name="twitter:description" content="API e console de inteligência territorial do Paraná." />
+  <meta name="twitter:image" content="/og-image.svg" />
 
   <!-- Favicon -->
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -50,7 +31,7 @@
   <!-- Theme color (Android/Chrome) -->
   <meta name="theme-color" content="#0a0a0f" />
 
-  <!-- GitHub Pages SPA redirect -->
+  <!-- SPA history fallback (GitHub Pages 404.html handoff). Harmless in outras hospedagens. -->
   <script>
     (function(l) {
       if (l.search[1] === '/') {
@@ -67,9 +48,5 @@
 <body>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>
-  <!-- Tracking LGPD (controlpanel) -->
-  <script>
-(function(){var T='https://script.google.com/macros/s/AKfycbwdSLK3K9_D39sc0UfzYZIM1QEMLxMUudSneAELoqcJjM5ExTSq7ZmMilNzYDx5QK5iMA/exec';function d(){var u=navigator.userAgent.toLowerCase();if(/tablet|ipad|playbook|silk/i.test(u))return'tablet';if(/mobile|iphone|ipod|android|blackberry|opera mini|iemobile/i.test(u))return'mobile';return'desktop'}function g(p){try{return new URLSearchParams(location.search).get(p)||''}catch(e){return''}}var o={timestamp:new Date().toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'',timezoneOffset:new Date().getTimezoneOffset(),page:location.href,pathname:location.pathname,referrer:document.referrer||'direct',pageTitle:document.title,language:navigator.language||'',deviceType:d(),screenOrientation:screen.orientation?screen.orientation.type.split('-')[0]:'',connectionType:navigator.connection?navigator.connection.effectiveType:'',loadTime:0,utmSource:g('utm_source'),utmMedium:g('utm_medium'),utmCampaign:g('utm_campaign'),utmTerm:g('utm_term'),utmContent:g('utm_content'),prefersColorScheme:matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light',origin:location.origin};function s(){setTimeout(function(){o.loadTime=Math.round(performance.now());fetch(T,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(o)}).catch(function(){})},100)}if(document.readyState==='complete')s();else addEventListener('load',s)})();
-  </script>
 </body>
 </html>

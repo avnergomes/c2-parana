@@ -21,14 +21,15 @@ export interface Subscription {
   stripe_customer_id: string | null
   stripe_subscription_id: string | null
   status: 'trialing' | 'active' | 'past_due' | 'canceled' | 'incomplete'
-  plan: 'solo' | 'pro' | 'enterprise'
+  // 'solo' = legado do tier antigo, mantido para subs existentes (mesmas features de 'starter').
+  plan: 'starter' | 'solo' | 'pro' | 'enterprise'
   trial_end: string | null
   current_period_end: string | null
   created_at: string
   updated_at: string
 }
 
-export type SubscriptionPlan = 'solo' | 'pro' | 'enterprise'
+export type SubscriptionPlan = 'starter' | 'solo' | 'pro' | 'enterprise'
 
 export interface FeatureAccess {
   clima: boolean
@@ -52,15 +53,26 @@ export const PLAN_FEATURES: Record<SubscriptionPlan | 'trial', FeatureAccess> = 
     alertas_push: false,
     api_access: false,
   },
+  // Starter (e 'solo' legado) → console completo nas camadas centrais + 1 chave de API.
+  starter: {
+    clima: true,
+    noticias: true,
+    mapa_basico: true,
+    agro: false,
+    saude: true,
+    ambiente: true,
+    alertas_push: true,
+    api_access: true,
+  },
   solo: {
     clima: true,
     noticias: true,
     mapa_basico: true,
     agro: false,
-    saude: false,
-    ambiente: false,
-    alertas_push: false,
-    api_access: false,
+    saude: true,
+    ambiente: true,
+    alertas_push: true,
+    api_access: true,
   },
   pro: {
     clima: true,

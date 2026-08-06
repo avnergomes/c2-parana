@@ -12,6 +12,8 @@ import { PricingPage } from '@/pages/PricingPage'
 import { CheckoutSuccessPage } from '@/pages/CheckoutSuccess'
 import { CheckoutCancelPage } from '@/pages/CheckoutCancel'
 import { AuthCallbackPage } from '@/pages/AuthCallback'
+import { TermsPage } from '@/pages/TermsPage'
+import { PrivacyPage } from '@/pages/PrivacyPage'
 
 // Lazy load dos módulos
 const DashboardPage = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.DashboardPage })))
@@ -46,6 +48,8 @@ export function AppRouter() {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
         <Route path="/checkout/cancel" element={<CheckoutCancelPage />} />
+        <Route path="/legal/termos" element={<TermsPage />} />
+        <Route path="/legal/privacidade" element={<PrivacyPage />} />
 
         {/* Rotas privadas com Layout (paywall ativo) */}
         <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>

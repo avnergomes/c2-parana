@@ -3,14 +3,26 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import Stripe from 'https://esm.sh/stripe@14.15.0?target=deno'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
-const ALLOWED_ORIGIN = Deno.env.get('CORS_ORIGIN') || 'https://c2parana.com.br'
+// CORS_ORIGINS: lista de origens permitidas separadas por vírgula.
+// Ex.: "https://app.datageoparana.com.br,https://datageoparana.com.br,http://localhost:5173"
+const ALLOWED_ORIGINS = (Deno.env.get('CORS_ORIGINS') || Deno.env.get('CORS_ORIGIN') || '')
+  .split(',').map(s => s.trim()).filter(Boolean)
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get('Origin') || ''
+  const allow = ALLOWED_ORIGINS.length === 0
+    ? origin // sem whitelist → ecoa origem (modo dev). Configure CORS_ORIGINS em prod.
+    : (ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0])
+  return {
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  }
 }
 
 serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -40,9 +52,10 @@ serve(async (req) => {
       })
     }
 
-    // Validar plano antes de tudo
-    if (!['solo', 'pro'].includes(plan)) {
-      return new Response(JSON.stringify({ error: 'Plano invalido. Use "solo" ou "pro".' }), {
+    // Validar plano antes de tudo. "solo" mantido como alias do legado para "starter".
+    const normalizedPlan = plan === 'solo' ? 'starter' : plan
+    if (!['starter', 'pro'].includes(normalizedPlan)) {
+      return new Response(JSON.stringify({ error: 'Plano invalido. Use "starter" ou "pro".' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
@@ -51,15 +64,17 @@ serve(async (req) => {
       apiVersion: '2024-06-20',
     })
 
-    // Mapa de price IDs por plano (criar no Stripe dashboard e colocar aqui)
-    const priceId = plan === 'pro'
+    // Mapa de price IDs por plano (criar no Stripe dashboard e colocar nos secrets).
+    // STRIPE_PRICE_SOLO mantido como fallback para deployments antigos.
+    const priceId = normalizedPlan === 'pro'
       ? Deno.env.get('STRIPE_PRICE_PRO')
-      : Deno.env.get('STRIPE_PRICE_SOLO')
+      : (Deno.env.get('STRIPE_PRICE_STARTER') || Deno.env.get('STRIPE_PRICE_SOLO'))
 
     if (!priceId) {
+      const envName = normalizedPlan === 'pro' ? 'STRIPE_PRICE_PRO' : 'STRIPE_PRICE_STARTER'
       return new Response(
         JSON.stringify({
-          error: `Stripe price ID para plano "${plan}" nao configurado. Configure STRIPE_PRICE_${plan.toUpperCase()} nos secrets do Supabase.`
+          error: `Stripe price ID para plano "${normalizedPlan}" nao configurado. Configure ${envName} nos secrets do Supabase.`
         }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -97,9 +112,9 @@ serve(async (req) => {
       mode: 'subscription',
       success_url: success_url || `${req.headers.get('origin')}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: cancel_url || `${req.headers.get('origin')}/pricing`,
-      metadata: { user_id: user.id, plan },
+      metadata: { user_id: user.id, plan: normalizedPlan },
       subscription_data: {
-        metadata: { user_id: user.id, plan },
+        metadata: { user_id: user.id, plan: normalizedPlan },
       },
       locale: 'pt-BR',
       currency: 'brl',
