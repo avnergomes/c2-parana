@@ -29,9 +29,15 @@
 >   zero frames, com subscription aceita e sem frame de erro. **Conta AISStream
 >   cortada — nada a corrigir no código.**
 >
-> **Pendente do usuário:** cadastrar o token de disparo no Vault
-> (`select vault.create_secret(...)`, valor no scratchpad da sessão), sem o qual
-> os jobs pg_cron da Fase 1 não podem ser agendados; e resolver a conta AISStream.
+> **Fase 1 fechada.** Token cadastrado no Vault; migrations 037 (crons da Fase 1)
+> e 038 (reagendamento de aviação/clima com o header do token) aplicadas. A troca
+> de aviação e clima foi feita na ordem segura — migration antes do deploy — e
+> não houve janela de queda: o cron de aviação rodou 4 minutos depois do deploy
+> com `success` e 29 registros. **5 pipelines agora em Supabase + pg_cron.**
+>
+> **Pendente:** resolver a conta AISStream (bloqueia `maritimo`); observar 24-48 h
+> e então remover o bloco `schedule` dos workflows dos 5 migrados; e portar as
+> Fases 2 a 4 (16 pipelines restantes).
 
 **Última atualização anterior:** 2026-05-19
 
@@ -121,10 +127,15 @@ anomalies, datasus) não passam por `data_cache`.
 
 | Runtime | Pipelines |
 |---|---|
-| Supabase Edge + pg_cron | aviacao, clima |
-| Supabase Edge, deployado, **cron pendente do Vault** | escalation, alerts, cemaden, maritimo |
+| Supabase Edge + pg_cron | aviacao, clima, escalation, alerts, cemaden |
+| Supabase Edge, deployado, cron suspenso (fonte morta) | maritimo |
 | GitHub Actions | os 16 restantes |
 | Exceção permanente (Actions) | datasus (`pysus` + DBC, impossível em Deno) |
+
+Os workflows do Actions dos 5 migrados **seguem ativos como backup** durante o
+período de observação de 24-48 h (passo 7 do checklist de cutover). Só depois
+disso o bloco `schedule` deve sair de `cron-escalation.yml`, `cron-alerts.yml` e
+`cron-cemaden.yml`, mantendo `workflow_dispatch`.
 
 ### Fase 1 — Common Operating Picture ✅
 
