@@ -187,7 +187,11 @@ interface CollectOutcome {
   diagnostics: StreamDiagnostics
 }
 
-function collectVessels(apiKey: string, windowSeconds: number): Promise<CollectOutcome> {
+function collectVessels(
+  apiKey: string,
+  windowSeconds: number,
+  bbox: number[][][] = PR_MARITIME_BBOX,
+): Promise<CollectOutcome> {
   return new Promise((resolve) => {
     const vessels = new Map<number, VesselSnapshot>()
     const diagnostics: StreamDiagnostics = {
@@ -234,7 +238,7 @@ function collectVessels(apiKey: string, windowSeconds: number): Promise<CollectO
     ws.onopen = () => {
       const sub = {
         APIKey: apiKey,
-        BoundingBoxes: PR_MARITIME_BBOX,
+        BoundingBoxes: bbox,
         FilterMessageTypes: ['PositionReport', 'StandardClassBPositionReport', 'ShipStaticData'],
       }
       try {
@@ -318,19 +322,49 @@ async function purgeOld(client: SupabaseClient) {
   if (error) console.warn(`purge err: ${error.message}`)
 }
 
+// BBox do mundo inteiro. Existe so para diagnostico: se a janela mundial
+// tambem devolve zero frames, o problema e a conta AISStream; se devolve
+// mensagens, o que morreu foi a cobertura de receptores do sul do Brasil.
+const WORLD_BBOX = [[[-90, -180], [90, 180]]]
+
 Deno.serve((req: Request) =>
   runEtl(req, 'maritimo', async (client): Promise<RunResult> => {
     const apiKey = Deno.env.get('AISSTREAM_API_KEY')
     if (!apiKey) throw new Error('AISSTREAM_API_KEY nao configurado')
 
-    const { vessels, diagnostics } = await collectVessels(apiKey, LISTEN_SECONDS)
+    // Modo diagnostico: ?bbox=world&window=30&dry=1. Nunca usado pelo pg_cron.
+    const params = new URL(req.url).searchParams
+    const useWorldBbox = params.get('bbox') === 'world'
+    const dryRun = params.get('dry') === '1'
+    const windowSeconds = Math.min(
+      Math.max(Number(params.get('window')) || LISTEN_SECONDS, 5),
+      300,
+    )
+
+    const { vessels, diagnostics } = await collectVessels(
+      apiKey,
+      windowSeconds,
+      useWorldBbox ? WORLD_BBOX : PR_MARITIME_BBOX,
+    )
+
+    // Em dry run nao escreve nada: serve so para ler o diagnostico.
+    if (dryRun) {
+      return {
+        status: vessels.length === 0 ? 'empty' : 'success',
+        dry_run: true,
+        bbox: useWorldBbox ? 'world' : 'parana',
+        total_vessels: vessels.length,
+        window_seconds: windowSeconds,
+        diagnostics,
+      }
+    }
 
     if (vessels.length === 0) {
       return {
         status: 'empty',
         total_vessels: 0,
         inserted: 0,
-        window_seconds: LISTEN_SECONDS,
+        window_seconds: windowSeconds,
         diagnostics,
       }
     }
@@ -348,7 +382,7 @@ Deno.serve((req: Request) =>
       total_vessels: vessels.length,
       inserted: result.inserted,
       errors: result.errors,
-      window_seconds: LISTEN_SECONDS,
+      window_seconds: windowSeconds,
       diagnostics,
     }
   })
