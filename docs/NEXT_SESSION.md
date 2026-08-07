@@ -1,126 +1,143 @@
 # Próxima sessão — onde paramos
 
-**Última sessão:** 2026-05-19 → 2026-05-20
-**Contexto curto:** pivô estratégico de c2-parana (C4ISR) para **DataGeo PR (API + Console SaaS)**
-aplicado em código. Plumbing P0 concluído. Falta a configuração externa (Stripe + Supabase
-+ deploy) que exige login em dashboards.
+**Última sessão:** 2026-08-06 → 2026-08-07
+**Contexto curto:** migração dos ETLs do GitHub Actions para Supabase
+(Edge Functions + pg_cron). **Fases 0 e 1 concluídas e em produção.** Restam as
+Fases 2 a 4 (16 pipelines).
 
-> Leia primeiro: [`PIVOT.md`](./PIVOT.md) (racional do pivô) e [`../STATUS.md`](../STATUS.md)
-> (status geral). Este arquivo é só o "continue de onde paramos".
+> Leia primeiro: [`PLANO_MIGRACAO_SUPABASE.md`](./PLANO_MIGRACAO_SUPABASE.md)
+> (gitignored, só no disco — é a especificação completa, com diário de
+> implementação na seção 11) e [`../STATUS.md`](../STATUS.md).
+> Este arquivo é só o "continue de onde paramos".
+
+**Motivação:** em 2026-08-06 o GitHub Actions teve outage major (~3 h, nenhum job
+conseguia runner). Todos os ETLs agendados pararam; os dois já migrados
+(aviação, clima) seguiram rodando. Frescor de dado é o produto do DataGeo PR,
+então o Actions como agendador é ponto único de falha.
 
 ---
 
-## ✅ Já entregue (commits ainda não criados — working tree)
+## ✅ Entregue e verificado em produção (10 commits, `bc33c70`..`9fb7036`)
 
-Diff resumido — type-check verde:
+### Fundação
+| Arquivo | O quê |
+|---|---|
+| `supabase/functions/_shared/etl.ts` | Client de service role, health record, `upsertCache`, `batchUpsert` com retry, `fetchWithRetry`/`fetchJson`/`fetchText` (UTF-8 explícito), `pooledMap` (substitui `ThreadPoolExecutor`), `assertEtlToken`, envelope `runEtl` |
+| `supabase/functions/_shared/pr_municipios.ts` | 399 municípios do PR + `stripAccentsLower`/`buildNameLookup`. Edge Function não tem filesystem e não existe tabela de municípios no banco |
+| `docs/templates/etl_pgcron.sql.tmpl` | Template de migration pg_cron |
+| migration 034 | Schema `etl`, `etl.trigger_headers()` (token vem do Vault), `etl.expected_cadence` (22 pipelines), views `public.etl_freshness` / `public.etl_stale` |
+| migrations 035, 036 | Correções da 034 — ver "erros que cometi" abaixo |
+| migrations 037, 038 | Crons da Fase 1 e reagendamento de aviação/clima com o header do token |
 
-| # | Arquivo | O quê |
-|---|---|---|
-| 1 | `index.html` | Removido referer gate (`datageoparana.github.io`) + tracking não-consentido (LGPD) |
-| 2 | `supabase/functions/create-checkout/index.ts` | CORS multi-origem via `CORS_ORIGINS` + plano `starter` (alias `solo` legado) + `STRIPE_PRICE_STARTER` |
-| 3 | `supabase/functions/create-portal/index.ts` | CORS multi-origem |
-| 4 | `src/lib/stripe.ts` *(novo)* | Singleton `getStripe()` |
-| 5 | `src/pages/PricingPage.tsx` | Reposicionado: Free + Starter R$99 + Pro R$399 + Enterprise. API-first copy |
-| 6 | `src/pages/TermsPage.tsx` *(novo)* | Termos de Uso (LGPD) |
-| 7 | `src/pages/PrivacyPage.tsx` *(novo)* | Política de Privacidade (LGPD) |
-| 8 | `src/router/index.tsx` | Rotas `/legal/termos` e `/legal/privacidade` |
-| 9 | `src/pages/Register.tsx` | Link real para ToS+PP (era `href="#"`) |
-| 10 | `src/hooks/useCheckout.ts` | Tipo `'starter' \| 'pro'` |
-| 11 | `src/types/index.ts` | `SubscriptionPlan` inclui `starter`; `PLAN_FEATURES.starter` adicionado |
-| 12 | `scripts/etl_agro.py` | Flag `is_fallback: true` no VBP sintético R$152bi |
-| 13 | `README.md` | Reescrito (era 13 bytes) |
-| 14 | `docs/PIVOT.md` *(novo)* | Documento estratégico do pivô |
-| 15 | `STATUS.md` | Header atualizado com a decisão de pivô |
-| 16 | `supabase/migrations/033_api_keys.sql` *(novo)* | `api_keys` (hash SHA-256), `api_usage`, `plan_quotas` (free/starter/pro/enterprise), função `check_api_quota()` SECURITY DEFINER |
-| 17 | `supabase/functions/public-api/index.ts` *(novo)* | Edge function da API pública — 5 endpoints v1: `/v1/health`, `/v1/clima/atual`, `/v1/queimadas`, `/v1/dengue/municipio/{ibge}`, `/v1/alertas`, `/v1/irtc/{ibge}`. Autentica via `Authorization: Bearer dgp_…`, enforça quota, loga em `api_usage` |
+### Pipelines migrados (5 em Supabase + pg_cron)
+`aviacao`, `clima`, `escalation`, `alerts`, `cemaden`.
 
-**Validação:** `npx tsc --noEmit` → exit 0. Nenhum teste rodado (Playwright requer dev server + ETLs requer Python env).
+Verificado em `cron.job_run_details`: aviação rodou 4 min após o deploy com
+`success` e 29 registros; clima e escalation `succeeded` no slot seguinte.
+
+### Bugs de produção corrigidos no caminho
+| ETL | O quê |
+|---|---|
+| `etl_dengue_projections.py` | **108 dias sem gravar, reportando `success`.** Três defeitos: `now_iso` com `+00:00` interpolado cru na URL do DELETE (o `+` vira espaço → 400), `on_conflict` sem `resolution=merge-duplicates` (POST era INSERT puro → 409), e mensagem de sucesso fora do `if`. Corrigido + `_write_health()`. Rodado de verdade: 1596 projeções, UTF-8 íntegro |
+| `etl_anomalies.py` | Mesmo bug de `merge-duplicates` (ainda não tinha mordido) + `_write_health()`. Auditoria dos 23 ETLs: só estes dois tinham o defeito |
+| migration 033 | Usava `uuid_generate_v4()` sem a extensão; nunca tinha sido aplicada. Trocado por `gen_random_uuid()` |
+| `etl-cemaden` (porte) | `titleCase` com `\w` ASCII produzia "ÂNgulo" e "Diamante D'oeste" — municípios reais do PR |
 
 ---
 
 ## ⏭️ Próximo passo (ordem sugerida)
 
-### Passo 1 — Stripe (~10 min, Chrome)
-- Dashboard → Products → New product:
-  - "DataGeo PR — Starter" → Price: BRL 99, recorrente mensal → copiar `price_xxx`
-  - "DataGeo PR — Pro" → Price: BRL 399, recorrente mensal → copiar `price_xxx`
-- Dashboard → Developers → Webhooks → Add endpoint:
-  - URL: `https://<SUPABASE_REF>.supabase.co/functions/v1/stripe-webhook`
-  - Eventos: `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`
-  - Copiar `whsec_xxx`
+### Passo 1 — Fechar o cutover da Fase 1 (após 24-48 h de observação)
+Só depois que `select * from public.etl_stale;` estiver limpo para os 5 migrados:
 
-### Passo 2 — Supabase Secrets (~5 min, Chrome)
-Dashboard → Project Settings → Edge Functions → Secrets:
+remover o bloco `schedule` de `cron-escalation.yml`, `cron-alerts.yml` e
+`cron-cemaden.yml`, renomear para "... (BACKUP)", manter `workflow_dispatch`.
+`cron-aviacao.yml` e `cron-clima.yml` já estão nesse padrão.
+
+> **Não pular.** Regra de ouro do plano: nunca desligar o Actions antes da
+> validação e do período de observação.
+
+### Passo 2 — AISStream (bloqueia `etl-maritimo`)
+`maritime_traffic` não recebe linha desde 2026-08-02. Diagnóstico conclusivo:
+com bbox do **mundo inteiro** a AISStream entrega **zero frames**, com
+subscription aceita e sem frame de erro. Conta cortada em silêncio, não é código.
+
+Para reproduzir depois de mexer na conta:
+```bash
+curl -X POST "$SUPABASE_URL/functions/v1/etl-maritimo?bbox=world&window=30&dry=1" \
+  -H "x-etl-token: $ETL_TRIGGER_TOKEN"
 ```
-STRIPE_SECRET_KEY      = sk_live_… (ou sk_test_…)
-STRIPE_WEBHOOK_SECRET  = whsec_…
-STRIPE_PRICE_STARTER   = price_…
-STRIPE_PRICE_PRO       = price_…
-CORS_ORIGINS           = https://app.datageoparana.com.br,http://localhost:5173
-```
+`dry=1` não escreve nada. Se voltar a receber frames, agendar o cron `*/10`.
 
-### Passo 3 — Deploy (CLI, ~3 min)
-```powershell
-cd C:\Users\avner\onedrive\documentos\github\c2-parana
-supabase link --project-ref <REF>     # se ainda não linkado
-supabase db push                       # aplica migration 033
-supabase functions deploy public-api
-supabase functions deploy create-checkout
-supabase functions deploy create-portal
-supabase functions deploy stripe-webhook
-```
+### Passo 3 — Fase 2 (6 pipelines DB→DB e feeds leves)
+`correlations`, `noticias`, `anomalies`, `irtc`, `dengue`, `situational`.
+Notas de porte na seção 6 do plano. Seguir o checklist da seção 8 para cada um.
 
-### Passo 4 — Validar smoke (~5 min)
-- `GET https://<ref>.supabase.co/functions/v1/public-api/v1/health` → 200 `{success:true,data:{status:"ok"}}`
-- Sem chave: `GET .../v1/clima/atual?ibge=4106902` → 401 `Missing Authorization`
-- Criar chave via `INSERT INTO api_keys` manualmente para testar (ou implementar tela `/configuracoes/api` — ainda não existe, ver "P1 pendente")
-- Pricing page → "Assinar Pro" → redirect Stripe Checkout funcionando
-
-### Passo 5 — Hospedagem em domínio próprio (~30 min)
-- Sair do GitHub Pages (`avnergomes.github.io/c2-parana/`).
-- Conectar repo ao Vercel ou Cloudflare Pages, deploy em `app.datageoparana.com.br`.
-- Atualizar `CORS_ORIGINS` para o domínio final.
-- Configurar DNS (CNAME `app` → vercel/cloudflare).
-
-### Passo 6 — Limpeza git (~1 min, destrutivo)
-```powershell
-git rm --cached data/idr-getec-raw/all_clients.csv
-git commit -m "chore: untrack legacy 60MB CSV (already in .gitignore)"
-```
-
----
-
-## 🔜 P1 pendente em código (não destrava lançamento, mas fica feio sem)
-
-- **Tela de gestão de chaves** em `/configuracoes/api` — listar `api_keys`, criar, revogar, copiar a chave UMA vez na criação. Hash SHA-256 no client antes de enviar (ou via edge function dedicada `create-api-key`). Estimativa: 1 sessão.
-- **Página de uso/billing** em `/configuracoes/faturamento` — mostrar consumo do mês (`api_usage` agregado), botão "Gerenciar assinatura" abrindo `create-portal`. Estimativa: 1 sessão.
-- **OpenAPI 3** para `/public-api` em `docs/openapi.yaml` — destrava SDKs e documentação. Estimativa: 30 min.
-- **Sentry SDK v7 → v8** (`@sentry/react`) — STATUS.md A8.
-- **Migrar cron-clima e cron-noticias para Edge Functions** — destrava o problema de ~3k execs/mês do GH Actions free tier.
-- **Consolidação de páginas:** decidir quais das 26 páginas atuais permanecem no roadmap e quais viram "demo verticais" só preservadas. Alvo realista: 10 mantidas.
+### Passos 4 e 5 — Fases 3 e 4
+Fase 3: `agua`, `ambiente`, `infohidro`, `healthcare`, `legislativo`, `saude`.
+Fase 4: `agro` + spike de PDF do GETEC (timebox 1 h, seção 6 do plano).
 
 ---
 
 ## 🧠 Decisões de design importantes (não reabrir sem motivo)
 
-1. **`solo` é alias de `starter`.** Existem subscriptions legadas; renomear `plan='solo'` no banco hoje quebraria RLS/queries. Em vez disso, ambos têm `PLAN_FEATURES` idênticos e `create-checkout` faz `normalizedPlan = plan === 'solo' ? 'starter' : plan`. Migrar de fato só após zerar usuários `solo`.
-2. **API keys: armazenamos hash SHA-256, não a chave.** Prefixo `dgp_live_XXXX…` exibido só na criação. Banco vazado ≠ chaves utilizáveis.
-3. **`check_api_quota()` é SECURITY DEFINER + REVOKE ALL FROM PUBLIC.** Só `service_role` chama; a edge function `public-api` é a única consumidora.
-4. **Quota é por chave, não por usuário.** `api_usage WHERE api_key_id = ... AND called_at >= date_trunc('month', NOW())`. Permite criar chaves de teste com limite implícito de "está incluso no plano".
-5. **`free` tier não cria registro em `subscriptions`.** Quem assina via Stripe cria; quem registra mas nunca paga fica sem row e cai em `plan_quotas.free` (1k/mês). O trigger `on_profile_created` ainda cria `trialing/pro` por 14 dias — depois disso a row vira `expired` e `check_api_quota` força `free`.
+- **Health record é sempre gravado, com campo `status`** — os scripts Python
+  deletavam em caso de sucesso (presença = falha). Gravar sempre dá frescor
+  observável, que é o que `etl_freshness` consome.
+- **Frescor vem de três origens**: health record, sources em `data_cache` e
+  tabela de domínio. Quatro pipelines (noticias, dengue, anomalies, datasus) não
+  passam por `data_cache`; medir só por lá gerava falso positivo.
+- **Token de disparo no Vault**, lido por `etl.trigger_headers()`. Nenhum segredo
+  em SQL versionado. A migration 032 tinha a anon key hardcoded em texto claro;
+  a 038 eliminou isso.
+- **`assertEtlToken` falha aberto se `ETL_TRIGGER_TOKEN` não estiver definido.**
+  Deliberado, para o rollout não quebrar funções agendadas antes do secret
+  existir. Hoje o secret existe, então tudo exige o header.
+- **`etl-alerts` diverge do Python em 3 pontos**, todos justificados no cabeçalho
+  do `index.ts`: fetch único em vez de N queries, `metadata` como objeto jsonb
+  (o Python fazia `json.dumps` numa coluna jsonb, o que grava uma *string*), e
+  criação de incidente por insert + 23505 (o índice de dedup é **parcial**, e
+  `ON CONFLICT` não infere índice parcial via PostgREST).
+- **Lógica pura em `parse.ts`** quando houver parsing não-trivial (padrão do
+  `etl-cemaden`): permite validar contra a fonte real sem deploy.
 
----
+## ⚠️ Armadilhas conhecidas
+
+- **Ordem obrigatória ao trocar uma função que já tem cron:** aplicar a migration
+  que reagenda o job com `etl.trigger_headers()` **antes** do
+  `functions deploy`. O contrário derruba o pipeline (401).
+- **`db push` é bloqueado para o agente** pelo classificador de permissões.
+  Deploy de Edge Function, `secrets set` e leituras pela Management API passam.
+  Escrever a migration e pedir `! npx supabase db push --linked` ao usuário.
+  Agrupar migrations para reduzir idas e vindas.
+- **Durante o dual-run**, `last_status` de `alerts` aparece como `null` na view —
+  o Python sobrescreve o health record com uma string JSON. Resolve no Passo 1.
+- **Python só via `py -3`** (`python`/`python3` não resolvem). Deno e Supabase
+  CLI só via `npx`.
 
 ## 🚫 Não fazer
 
-- **Não criar PLANO_*.md novo na raiz.** STATUS.md é o único contrato de status; PIVOT.md é o único contrato de posicionamento; este NEXT_SESSION.md é o handoff de curto prazo. Mais que isso vira drift documental (ver STATUS §9).
-- **Não desfazer o pivô SaaS sem revisitar PIVOT.md.** Os 7 problemas conceituais permanecem se voltarmos para "C4ISR self-serve".
-- **Não habilitar tracking analytics sem banner de consentimento.** O script removido do `index.html` enviava UA/timezone/UTM sem opt-in — se for reintroduzir, fazer com banner + base legal documentada em PrivacyPage.
+- Não desligar cron do Actions antes dos passos 5 e 7 do checklist.
+- Não agendar `etl-maritimo` enquanto a AISStream não voltar — polui o monitor.
+- Não portar `etl_datasus.py` (exceção permanente: `pysus` + descompressão DBC).
+- Não "corrigir" `titleCase` para o nome oficial dos municípios durante a
+  migração — hoje ele reproduz o `str.title()` do Python de propósito
+  (104 dos 399 ficam com conectivo capitalizado, ex. "Agudos Do Sul"). Item
+  pós-migração, registrado no plano.
 
----
+## 📌 Pendências do usuário
 
-## 📂 Memória global complementar
+- **Revogar o access token `migracao-etl-c2-parana`** (supabase.com/dashboard/account/tokens) —
+  apareceu em texto claro na conversa da sessão.
+- **Org "APG Consulting" marcada como EXCEEDING USAGE LIMITS** no plano Free.
+  Verificar antes de mover mais carga; a estimativa do plano (~25 mil
+  invocações/mês contra 500 mil do free tier) é folgada, então provavelmente é
+  outro recurso (banda ou tamanho do banco).
+- `public-api` e `scrape-infohidro` **nunca foram deployadas**, ao contrário do
+  que o plano e o STATUS assumiam.
 
-Cópia desta decisão também salva em:
-`C:\Users\avner\.claude\projects\C--Users-avner-onedrive-documentos-github-c2-parana\memory\project_pivot_2026_05_19.md`
-(sobrevive a `rm -rf` do repo; este NEXT_SESSION.md sobrevive a wipes de `~/.claude`).
+## 📂 Dados fixos
+
+- `project-ref`: `fialxjcsgywvvuxjxcly`
+- Consulta de saúde: `select * from public.etl_stale;`
+- Deploy: `npx supabase functions deploy etl-<nome> --project-ref fialxjcsgywvvuxjxcly --no-verify-jwt`
