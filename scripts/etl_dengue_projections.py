@@ -57,7 +57,13 @@ def postgrest_get(table: str, select: str = "*", params: dict | None = None, lim
 def postgrest_post(table: str, records: list, on_conflict: str | None = None) -> bool:
     if not records:
         return True
-    post_headers = {**HEADERS, "Prefer": "return=minimal"}
+    # `on_conflict` sozinho nao faz upsert no PostgREST: sem
+    # `resolution=merge-duplicates` o POST continua sendo INSERT puro e devolve
+    # 409/23505 quando a linha ja existe. Era o que acontecia aqui.
+    prefer = "return=minimal"
+    if on_conflict:
+        prefer = "resolution=merge-duplicates," + prefer
+    post_headers = {**HEADERS, "Prefer": prefer}
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     if on_conflict:
         url += f"?on_conflict={on_conflict}"
@@ -211,18 +217,38 @@ def main():
     # 3. Persist
     print("\n[3/3] Persistindo projecoes...")
     if projections:
-        # Delete old projections first (full refresh)
+        # Full refresh: apaga as projecoes anteriores antes de gravar as novas.
+        #
+        # O filtro vai em `params` e nao interpolado na URL: now_iso termina em
+        # "+00:00" e, cru na query string, o "+" e decodificado como espaco.
+        # PostgREST recebia um timestamp invalido e devolvia 400, entao o delete
+        # nunca acontecia, as linhas antigas sobreviviam e o POST seguinte
+        # colidia com elas. Resultado: a tabela ficou 108 dias sem atualizar
+        # enquanto o workflow reportava sucesso.
         del_resp = requests.delete(
-            f"{SUPABASE_URL}/rest/v1/dengue_projections?calculated_at=lt.{now_iso}",
+            f"{SUPABASE_URL}/rest/v1/dengue_projections",
             headers={**HEADERS, "Prefer": "return=minimal"},
+            params={"calculated_at": f"lt.{now_iso}"},
             timeout=30,
         )
         if del_resp.status_code in (200, 204):
-            print(f"  Projecoes antigas removidas")
+            print("  Projecoes antigas removidas")
+        else:
+            print(
+                f"  ERRO DELETE dengue_projections: HTTP {del_resp.status_code}"
+                f" - {del_resp.text[:200]}"
+            )
 
-        postgrest_post("dengue_projections", projections,
-                       on_conflict="ibge_code,projected_week,projected_year")
-        print(f"  {len(projections)} projecoes salvas")
+        # A mensagem de sucesso so sai se o upsert realmente funcionou. Antes ela
+        # era impressa incondicionalmente, o que escondia o erro acima e deixava
+        # o workflow verde com zero linhas gravadas.
+        if postgrest_post("dengue_projections", projections,
+                          on_conflict="ibge_code,projected_week,projected_year"):
+            print(f"  {len(projections)} projecoes salvas")
+        else:
+            print("  FALHA ao salvar projecoes")
+            _write_health(status="error", projections=0)
+            raise SystemExit(1)
 
     # Summary: top 10 em alta
     alta = [p for p in projections if p["trend"] == "alta"]
@@ -238,7 +264,44 @@ def main():
             print(f"    {p['municipality']}: slope={p['slope']} casos/sem, R2={p['r_squared']}")
 
     duration = (datetime.now() - start).total_seconds()
+    _write_health(status="success", projections=len(projections), duration_s=duration)
     print(f"\nETL Projecao Dengue concluido em {duration:.1f}s")
+
+
+def _write_health(status: str, projections: int, duration_s: float = 0.0) -> None:
+    """Grava etl_health_dengue em data_cache.
+
+    Este ETL nao registrava saude em lugar nenhum, entao a unica forma de saber
+    se ele rodava era olhar o max(calculated_at) de dengue_projections -- que
+    ficou 108 dias congelado sem ninguem notar, porque o workflow reportava
+    sucesso. Com o health record, a view public.etl_freshness passa a distinguir
+    "rodou e nao tinha o que gravar" de "nao rodou".
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/data_cache",
+            headers={
+                **HEADERS,
+                "Prefer": "resolution=merge-duplicates,return=minimal",
+            },
+            params={"on_conflict": "cache_key"},
+            json=[{
+                "cache_key": "etl_health_dengue",
+                "source": "etl_dengue_projections",
+                "data": {
+                    "last_run": now,
+                    "status": status,
+                    "projections": projections,
+                    "duration_seconds": round(duration_s, 2),
+                    "runtime": "github-actions",
+                },
+                "fetched_at": now,
+            }],
+            timeout=15,
+        )
+    except Exception as err:  # health nunca pode derrubar o ETL
+        print(f"  AVISO: health record falhou: {err}")
 
 
 if __name__ == "__main__":
