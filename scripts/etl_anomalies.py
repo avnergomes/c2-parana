@@ -53,7 +53,15 @@ def postgrest_get(table: str, select: str = "*", params: dict | None = None) -> 
 def postgrest_post(table: str, records: list, on_conflict: str | None = None) -> bool:
     if not records:
         return True
-    post_headers = {**HEADERS, "Prefer": "return=minimal"}
+    # `on_conflict` sozinho nao faz upsert no PostgREST: sem
+    # `resolution=merge-duplicates` o POST segue sendo INSERT puro e devolve
+    # 409/23505 quando a linha ja existe. Aqui o bug nunca chegou a morder
+    # porque detected_at entra na chave e e sempre novo, mas e o mesmo defeito
+    # que deixou etl_dengue_projections 108 dias sem gravar.
+    prefer = "return=minimal"
+    if on_conflict:
+        prefer = "resolution=merge-duplicates," + prefer
+    post_headers = {**HEADERS, "Prefer": prefer}
     url = f"{SUPABASE_URL}/rest/v1/{table}"
     if on_conflict:
         url += f"?on_conflict={on_conflict}"
@@ -245,7 +253,43 @@ def main():
               f"valor={a['observed_value']} z={a['z_score']} (media={a['window_mean']})")
 
     duration = (datetime.now() - start).total_seconds()
+    _write_health(len(all_anomalies), duration)
     print(f"\nETL Anomalias concluido em {duration:.1f}s | {len(all_anomalies)} anomalias")
+
+
+def _write_health(anomalies: int, duration_s: float) -> None:
+    """Grava etl_health_anomalies em data_cache.
+
+    Este ETL e um detector: zero anomalias e resultado valido, nao falha. Sem
+    health record, a unica evidencia de execucao era uma linha nova em
+    `anomalies` -- entao um periodo normal (nada detectado) ficava indistinguivel
+    de pipeline morto, e a view public.etl_freshness o marcava como atrasado.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/data_cache",
+            headers={
+                **HEADERS,
+                "Prefer": "resolution=merge-duplicates,return=minimal",
+            },
+            params={"on_conflict": "cache_key"},
+            json=[{
+                "cache_key": "etl_health_anomalies",
+                "source": "etl_anomalies",
+                "data": {
+                    "last_run": now,
+                    "status": "success",
+                    "anomalies_detected": anomalies,
+                    "duration_seconds": round(duration_s, 2),
+                    "runtime": "github-actions",
+                },
+                "fetched_at": now,
+            }],
+            timeout=15,
+        )
+    except Exception as err:  # health nunca pode derrubar o ETL
+        print(f"  AVISO: health record falhou: {err}")
 
 
 if __name__ == "__main__":
