@@ -1,6 +1,39 @@
 # DataGeo PR — Status de Implementação (ex-c2-parana)
 
-**Última atualização:** 2026-05-19
+**Última atualização:** 2026-08-07
+
+> **2026-08-07 — Migração dos ETLs para Supabase, fases 0 e 1.** O outage major
+> do GitHub Actions em 2026-08-06 (nenhum job conseguia runner por ~3 h) parou
+> todos os ETLs agendados, enquanto os dois já migrados (aviação, clima) seguiram
+> rodando via pg_cron. Como frescor de dado é o produto, o Actions como agendador
+> é ponto único de falha. Plano completo em `docs/PLANO_MIGRACAO_SUPABASE.md`
+> (gitignored).
+>
+> **Fundação (Fase 0):** `supabase/functions/_shared/etl.ts` (client, health
+> record, `batchUpsert` com retry, `pooledMap` no lugar do ThreadPoolExecutor,
+> `assertEtlToken`, envelope `runEtl`) e `_shared/pr_municipios.ts` (399
+> municípios). Migrations 034–036: schema `etl`, `etl.trigger_headers()` lendo o
+> token de disparo do Vault, e as views `public.etl_freshness` / `public.etl_stale`.
+>
+> **Fase 1 no ar:** `etl-escalation`, `etl-alerts`, `etl-cemaden` e
+> `etl-maritimo` deployadas e invocadas com sucesso. Gate de segurança
+> confirmado: 401 sem `x-etl-token`, 200 com.
+>
+> **A monitoração encontrou dois problemas de produção logo na primeira consulta:**
+> - `dengue` estava **108 dias sem gravar** reportando `success` (três defeitos
+>   encadeados: `+00:00` não escapado na URL do DELETE, `on_conflict` sem
+>   `resolution=merge-duplicates`, e mensagem de sucesso fora do `if`).
+>   Corrigido e verificado com execução real: 1596 projeções, UTF-8 íntegro.
+> - `etl-maritimo` coleta zero desde 2026-08-02 em **ambos** os runtimes.
+>   Diagnóstico conclusivo: com bbox do mundo inteiro a AISStream também entrega
+>   zero frames, com subscription aceita e sem frame de erro. **Conta AISStream
+>   cortada — nada a corrigir no código.**
+>
+> **Pendente do usuário:** cadastrar o token de disparo no Vault
+> (`select vault.create_secret(...)`, valor no scratchpad da sessão), sem o qual
+> os jobs pg_cron da Fase 1 não podem ser agendados; e resolver a conta AISStream.
+
+**Última atualização anterior:** 2026-05-19
 
 > **2026-05-19 — Pivô estratégico aplicado.** Repositionado de "C4ISR para Defesa
 > Civil" para **API + Console de Inteligência Territorial** (free + R$99 + R$399 +
@@ -71,7 +104,27 @@ Todos os 6 ETLs core estabilizados com fallback/retry:
 | Notícias (RSS) | `etl_noticias.py` | `cron-noticias.yml` (15min) | ✅ |
 | Legislativo (ALEP) | `etl_legislativo.py` | `cron-legislativo.yml` (diário) | ✅ |
 
-**Pendente:** dashboard dedicado de health de crons (hoje só via Actions logs).
+**Health de crons:** resolvido em 2026-08-07 pela view `public.etl_freshness`
+(migrations 034–036), que cobre os 22 pipelines com cadência esperada e sinaliza
+atraso acima de 2× a cadência. Consulta rápida:
+
+```sql
+select * from public.etl_stale;   -- só os atrasados
+select * from public.etl_freshness order by is_stale desc, age_minutes desc;
+```
+
+O frescor considera o mais recente entre o health record, as sources em
+`data_cache` e a tabela de domínio — porque quatro pipelines (noticias, dengue,
+anomalies, datasus) não passam por `data_cache`.
+
+### Runtime de cada pipeline (2026-08-07)
+
+| Runtime | Pipelines |
+|---|---|
+| Supabase Edge + pg_cron | aviacao, clima |
+| Supabase Edge, deployado, **cron pendente do Vault** | escalation, alerts, cemaden, maritimo |
+| GitHub Actions | os 16 restantes |
+| Exceção permanente (Actions) | datasus (`pysus` + DBC, impossível em Deno) |
 
 ### Fase 1 — Common Operating Picture ✅
 
