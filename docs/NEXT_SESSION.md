@@ -32,8 +32,31 @@ então o Actions como agendador é ponto único de falha.
 ### Pipelines migrados (5 em Supabase + pg_cron)
 `aviacao`, `clima`, `escalation`, `alerts`, `cemaden`.
 
-Verificado em `cron.job_run_details`: aviação rodou 4 min após o deploy com
-`success` e 29 registros; clima e escalation `succeeded` no slot seguinte.
+Verificado ponta a ponta em `cron.job_run_details` — **os 5 jobs dispararam pelo
+pg_cron e concluíram `succeeded`**:
+
+| Job | Disparo | Status |
+|---|---|---|
+| `etl-aviacao-every-minute` | 09:07, 09:08, 09:09 | succeeded (4 min após o deploy, `success` com 29 registros) |
+| `etl-clima-every-15min` | 09:15:00 | succeeded |
+| `etl-escalation` | 09:15:00 | succeeded |
+| `etl-alerts` | 09:30:00 | succeeded |
+| `etl-cemaden` | 09:30:00 | succeeded |
+
+Estado em `public.etl_freshness` às 09:33 — todos `runtime = supabase-edge` e
+`is_stale = false`:
+
+```
+aviacao       0 min   success
+alerts        3 min   success
+cemaden       3 min   empty     ← correto: 0 alertas ativos no PR
+clima         3 min   success
+escalation    3 min   success
+```
+
+O `last_status: null` de `alerts` (artefato do dual-run com o Python) se
+resolveu sozinho assim que a Edge Function sobrescreveu o health record com um
+objeto jsonb de verdade.
 
 ### Bugs de produção corrigidos no caminho
 | ETL | O quê |
@@ -48,7 +71,11 @@ Verificado em `cron.job_run_details`: aviação rodou 4 min após o deploy com
 ## ⏭️ Próximo passo (ordem sugerida)
 
 ### Passo 1 — Fechar o cutover da Fase 1 (após 24-48 h de observação)
-Só depois que `select * from public.etl_stale;` estiver limpo para os 5 migrados:
+Passos 1 a 6 do checklist do plano estão feitos e verificados. Falta só deixar o
+tempo passar (passo 7) e então desligar o Actions (passo 8).
+
+Só depois que `select * from public.etl_stale;` estiver limpo para os 5 migrados
+por 24-48 h:
 
 remover o bloco `schedule` de `cron-escalation.yml`, `cron-alerts.yml` e
 `cron-cemaden.yml`, renomear para "... (BACKUP)", manter `workflow_dispatch`.
