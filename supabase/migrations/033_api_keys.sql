@@ -11,7 +11,10 @@
 -- TABELA: api_keys
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.api_keys (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  -- gen_random_uuid() e nativo do Postgres 13+; uuid_generate_v4() exigiria a
+  -- extensao uuid-ossp, que este projeto nao instala. Todas as outras
+  -- migrations (010, 011, 017, 018, 019, 020) ja usam gen_random_uuid().
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,                       -- rótulo do usuário ("prod", "dev iphone")
   key_prefix TEXT NOT NULL,                 -- primeiros 12 chars para identificar visualmente
