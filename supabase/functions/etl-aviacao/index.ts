@@ -5,16 +5,15 @@
 // Runtime, agendado via pg_cron + pg_net a cada 1min (mais confiavel
 // que GH Actions cron, que estava jitterando ate 90min).
 //
-// Auth: aceita JWT padrao (anon key suficiente). Escrita usa
+// Auth: header x-etl-token (ver _shared/etl.ts). Escrita usa
 // SUPABASE_SERVICE_ROLE_KEY via env interno do edge runtime.
 
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import {
+  batchUpsert,
+  runEtl,
+  type RunResult,
+  type SupabaseClient,
+} from '../_shared/etl.ts'
 
 const PR_CENTER_LAT = -24.89
 const PR_CENTER_LON = -51.55
@@ -173,107 +172,39 @@ function dedupeByMinute(records: AircraftRecord[]): AircraftRecord[] {
   return Array.from(seen.values())
 }
 
-interface InsertCounters {
-  inserted: number
-  skipped: number
-  errors: number
-}
-
-async function insertWithDedupe(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  records: AircraftRecord[],
-): Promise<InsertCounters> {
-  const counters: InsertCounters = { inserted: 0, skipped: 0, errors: 0 }
-  for (const r of records) {
-    const { error } = await supabase.from('aviation_traffic').insert(r)
-    if (!error) {
-      counters.inserted++
-      continue
-    }
-    const msg = (error.message ?? '').toLowerCase()
-    if (msg.includes('duplicate key') || error.code === '23505') {
-      counters.skipped++
-    } else {
-      counters.errors++
-      console.error(`insert err: ${error.message}`)
-    }
-  }
-  return counters
-}
-
-// deno-lint-ignore no-explicit-any
-async function purgeOld(supabase: any): Promise<void> {
+async function purgeOld(client: SupabaseClient): Promise<void> {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
-  const { error } = await supabase.from('aviation_traffic').delete().lt('observed_at', cutoff)
+  const { error } = await client.from('aviation_traffic').delete().lt('observed_at', cutoff)
   if (error) console.warn(`purge err: ${error.message}`)
-  else console.log(`purge: removed rows < ${cutoff}`)
 }
 
-async function recordHealth(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  status: string,
-  total: number,
-  counters: InsertCounters,
-  durationMs: number,
-): Promise<void> {
-  const payload = {
-    cache_key: 'etl_health_aviacao',
-    data: {
-      last_run: new Date().toISOString(),
-      status,
-      total_received: total,
-      inserted: counters.inserted,
-      skipped_dup: counters.skipped,
-      errors: counters.errors,
-      duration_seconds: durationMs / 1000,
-      source: 'airplanes.live',
-      runtime: 'supabase-edge',
-    },
-    source: 'etl_aviacao',
-    fetched_at: new Date().toISOString(),
-  }
-  const { error } = await supabase
-    .from('data_cache')
-    .upsert(payload, { onConflict: 'cache_key' })
-  if (error) console.warn(`health record err: ${error.message}`)
-}
+Deno.serve((req: Request) =>
+  runEtl(req, 'aviacao', async (client): Promise<RunResult> => {
+    const states = await fetchAirplanesLive()
+    if (states.length === 0) {
+      return { status: 'empty', total_received: 0, inserted: 0, source: 'airplanes.live' }
+    }
 
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
-
-  const startMs = Date.now()
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const supabase = createClient(supabaseUrl, serviceKey)
-
-  const states = await fetchAirplanesLive()
-  if (states.length === 0) {
-    await recordHealth(supabase, 'empty', 0, { inserted: 0, skipped: 0, errors: 0 }, Date.now() - startMs)
-    return new Response(
-      JSON.stringify({ status: 'empty', total: 0 }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    // aviation_traffic tem UNIQUE (icao24, observed_at). O dedupe em memoria ja
+    // colapsa as leituras do mesmo minuto; o upsert cobre o resto (execucoes
+    // sobrepostas dos 3 schedules com offset da migration 031).
+    const deduped = dedupeByMinute(states)
+    const result = await batchUpsert(
+      client,
+      'aviation_traffic',
+      deduped as unknown as Record<string, unknown>[],
+      'icao24,observed_at',
+      500,
     )
-  }
+    await purgeOld(client)
 
-  const deduped = dedupeByMinute(states)
-  const counters = await insertWithDedupe(supabase, deduped)
-  await purgeOld(supabase)
-
-  const status = counters.errors > counters.inserted ? 'error' : counters.errors > 0 ? 'partial' : 'success'
-  await recordHealth(supabase, status, states.length, counters, Date.now() - startMs)
-
-  return new Response(
-    JSON.stringify({
-      status,
+    return {
+      status: result.errors > 0 ? 'partial' : 'success',
       total_received: states.length,
       deduped: deduped.length,
-      ...counters,
-      duration_ms: Date.now() - startMs,
-    }),
-    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-  )
-})
+      inserted: result.inserted,
+      errors: result.errors,
+      source: 'airplanes.live',
+    }
+  })
+)

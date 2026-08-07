@@ -10,13 +10,11 @@
 // a cada hora, mas pollar mais frequente garante que mudancas de
 // estacao chegam ao mapa em <15min mesmo se 1 run falhar.
 
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import {
+  batchUpsert,
+  runEtl,
+  type RunResult,
+} from '../_shared/etl.ts'
 
 interface StationMeta {
   code: string
@@ -143,84 +141,37 @@ async function fetchAllStations(): Promise<ClimateRecord[]> {
   return all
 }
 
-interface InsertCounters {
-  inserted: number
-  skipped: number
-  errors: number
-}
-
-// deno-lint-ignore no-explicit-any
-async function insertWithDedupe(supabase: any, records: ClimateRecord[]): Promise<InsertCounters> {
-  const counters: InsertCounters = { inserted: 0, skipped: 0, errors: 0 }
-  // Upsert em chunks por (station_code, observed_at) — climate_data tem
-  // UNIQUE nessa combinacao. Mais rapido que insert um a um.
-  const CHUNK = 100
-  for (let i = 0; i < records.length; i += CHUNK) {
-    const chunk = records.slice(i, i + CHUNK)
-    const { error, count } = await supabase
-      .from('climate_data')
-      .upsert(chunk, { onConflict: 'station_code,observed_at', count: 'estimated' })
-    if (error) {
-      counters.errors += chunk.length
-      console.error(`upsert chunk err: ${error.message}`)
-    } else {
-      counters.inserted += count ?? chunk.length
+Deno.serve((req: Request) =>
+  runEtl(req, 'clima', async (client): Promise<RunResult> => {
+    const records = await fetchAllStations()
+    if (records.length === 0) {
+      return {
+        status: 'empty',
+        total_records: 0,
+        inserted: 0,
+        stations: PR_STATIONS.length,
+        source: 'open-meteo',
+      }
     }
-  }
-  return counters
-}
 
-async function recordHealth(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  status: string,
-  total: number,
-  counters: InsertCounters,
-  durationMs: number,
-) {
-  const payload = {
-    cache_key: 'etl_health_clima',
-    data: {
-      last_run: new Date().toISOString(),
-      status,
-      total_records: total,
-      inserted: counters.inserted,
-      errors: counters.errors,
-      duration_seconds: durationMs / 1000,
-      stations: PR_STATIONS.length,
-      runtime: 'supabase-edge',
-      source: 'open-meteo',
-    },
-    source: 'etl_clima',
-    fetched_at: new Date().toISOString(),
-  }
-  const { error } = await supabase.from('data_cache').upsert(payload, { onConflict: 'cache_key' })
-  if (error) console.warn(`health err: ${error.message}`)
-}
-
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
-
-  const startMs = Date.now()
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const supabase = createClient(supabaseUrl, serviceKey)
-
-  const records = await fetchAllStations()
-  if (records.length === 0) {
-    await recordHealth(supabase, 'empty', 0, { inserted: 0, skipped: 0, errors: 0 }, Date.now() - startMs)
-    return new Response(
-      JSON.stringify({ status: 'empty', total: 0 }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    // climate_data tem UNIQUE (station_code, observed_at); past_days=2 traz
+    // sempre 48h, entao a maioria das linhas de cada run ja existe e o upsert
+    // apenas as atualiza.
+    const result = await batchUpsert(
+      client,
+      'climate_data',
+      records as unknown as Record<string, unknown>[],
+      'station_code,observed_at',
+      500,
     )
-  }
 
-  const counters = await insertWithDedupe(supabase, records)
-  const status = counters.errors > 0 ? 'partial' : 'success'
-  await recordHealth(supabase, status, records.length, counters, Date.now() - startMs)
-
-  return new Response(
-    JSON.stringify({ status, total: records.length, ...counters, duration_ms: Date.now() - startMs }),
-    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-  )
-})
+    return {
+      status: result.errors > 0 ? 'partial' : 'success',
+      total_records: records.length,
+      inserted: result.inserted,
+      errors: result.errors,
+      stations: PR_STATIONS.length,
+      source: 'open-meteo',
+    }
+  })
+)

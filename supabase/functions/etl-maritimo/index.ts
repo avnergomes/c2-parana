@@ -1,22 +1,33 @@
 // supabase/functions/etl-maritimo/index.ts
-// Maritime traffic ETL: AISStream.io WebSocket -> maritime_traffic.
+// Trafego maritimo: AISStream.io WebSocket -> maritime_traffic.
 //
-// Equivalente Deno do scripts/etl_maritimo.py. Edge Function suporta
-// WebSocket nativo do Deno; abrimos por uma janela curta (~90s),
-// agregamos posicoes e fazemos batch insert.
+// Equivalente Deno do scripts/etl_maritimo.py. Abre o WebSocket por uma janela
+// curta, agrega posicoes por MMSI e insere em lote.
+//
+// DIAGNOSTICO 2026-08-06: esta funcao vinha coletando 0 embarcacoes, o que o
+// plano de migracao atribuiu a um bug de porte (janela de 90s vs 120s do
+// Python). Verificacao no banco derrubou essa hipotese: a ultima linha em
+// maritime_traffic e de 2026-08-02T09:24Z e o proprio ETL Python (rodando no
+// Actions, com janela de 120s) tambem vem gravando status "empty" desde entao.
+// Ou seja, os dois runtimes coletam zero: o problema esta a montante, na conta
+// AISStream (chave expirada, quota estourada ou plano alterado), nao no porte.
+//
+// Consequencia de projeto: como o log de Edge Function so existe no dashboard,
+// o health record passa a carregar os diagnosticos do WebSocket (frames
+// recebidos, codigo de fechamento, primeiro frame de erro). Assim a proxima
+// investigacao se resolve com uma query em data_cache.
 
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import {
+  batchUpsert,
+  runEtl,
+  type RunResult,
+  type SupabaseClient,
+} from '../_shared/etl.ts'
 
 const AISSTREAM_URL = 'wss://stream.aisstream.io/v0/stream'
-// BBox costa PR + aproximacao Atlantica (mesma do ETL Python)
+// BBox costa PR + aproximacao Atlantica (identica a do ETL Python)
 const PR_MARITIME_BBOX = [[[-27.5, -49.0], [-23.5, -45.0]]]
-const LISTEN_SECONDS = 90
+const LISTEN_SECONDS = 120
 const RETENTION_DAYS = 7
 
 const SHIP_TYPE_LABELS: Record<number, string> = {
@@ -64,6 +75,18 @@ interface VesselSnapshot {
   observed_at?: string
 }
 
+/** Diagnostico da sessao WebSocket, embutido no health record. */
+interface StreamDiagnostics {
+  subscription_sent: boolean
+  messages_received: number
+  parse_errors: number
+  mmsi_distinct: number
+  close_code: number | null
+  close_reason: string | null
+  first_error_frame: string | null
+  socket_error: string | null
+}
+
 const GO_TIME_RE = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?\s*([+-]\d{4})?(?:\s+\w+)?$/
 
 function parseAisTime(value: string): Date {
@@ -84,7 +107,11 @@ function truncateToMinute(dateOrIso: Date | string): string {
   return d.toISOString()
 }
 
-function ingestPosition(snap: VesselSnapshot, msg: Record<string, unknown>, meta: Record<string, unknown>) {
+function ingestPosition(
+  snap: VesselSnapshot,
+  msg: Record<string, unknown>,
+  meta: Record<string, unknown>,
+) {
   const lat = msg.Latitude
   const lon = msg.Longitude
   if (typeof lat === 'number') snap.latitude = lat
@@ -141,7 +168,10 @@ function vesselToRow(v: VesselSnapshot): Record<string, unknown> {
     cog_deg: v.cog_deg ?? null,
     heading_deg: v.heading_deg ?? null,
     nav_status: v.nav_status ?? null,
-    nav_status_label: v.nav_status !== null && v.nav_status !== undefined ? NAV_STATUS_LABELS[v.nav_status] ?? null : null,
+    nav_status_label:
+      v.nav_status !== null && v.nav_status !== undefined
+        ? NAV_STATUS_LABELS[v.nav_status] ?? null
+        : null,
     destination: v.destination ?? null,
     eta: v.eta ?? null,
     draught_m: v.draught_m ?? null,
@@ -152,35 +182,54 @@ function vesselToRow(v: VesselSnapshot): Record<string, unknown> {
   }
 }
 
-async function collectVessels(apiKey: string, windowSeconds: number): Promise<VesselSnapshot[]> {
-  return await new Promise((resolve) => {
+interface CollectOutcome {
+  vessels: VesselSnapshot[]
+  diagnostics: StreamDiagnostics
+}
+
+function collectVessels(apiKey: string, windowSeconds: number): Promise<CollectOutcome> {
+  return new Promise((resolve) => {
     const vessels = new Map<number, VesselSnapshot>()
+    const diagnostics: StreamDiagnostics = {
+      subscription_sent: false,
+      messages_received: 0,
+      parse_errors: 0,
+      mmsi_distinct: 0,
+      close_code: null,
+      close_reason: null,
+      first_error_frame: null,
+      socket_error: null,
+    }
+
     let ws: WebSocket | null = null
-    let messagesReceived = 0
-    let parseErrors = 0
-    let subscriptionSent = false
+    let settled = false
     const deadline = Date.now() + windowSeconds * 1000
 
     const finalize = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       try { ws?.close() } catch (_) { /* noop */ }
+
+      diagnostics.mmsi_distinct = vessels.size
       const valid = Array.from(vessels.values()).filter(
         (v) => typeof v.latitude === 'number' && typeof v.longitude === 'number',
       )
-      console.log(
-        `AISStream summary: subscribed=${subscriptionSent} msgs=${messagesReceived} parseErrors=${parseErrors} mmsiDistinct=${vessels.size} validPosition=${valid.length}`,
-      )
-      resolve(valid)
+      console.log(`AISStream: ${JSON.stringify(diagnostics)} validPosition=${valid.length}`)
+      resolve({ vessels: valid, diagnostics })
     }
+
+    // Teto absoluto: garante que a promise resolve mesmo se o socket nunca
+    // abrir nem fechar (a Edge Function tem wall-clock de ~400s).
+    const timer = setTimeout(finalize, windowSeconds * 1000 + 2000)
 
     try {
       ws = new WebSocket(AISSTREAM_URL)
     } catch (err) {
-      console.error(`WebSocket connect err: ${(err as Error).message}`)
-      resolve([])
+      diagnostics.socket_error = (err as Error).message
+      finalize()
       return
     }
-
-    const timer = setTimeout(finalize, windowSeconds * 1000 + 1000)
 
     ws.onopen = () => {
       const sub = {
@@ -188,44 +237,49 @@ async function collectVessels(apiKey: string, windowSeconds: number): Promise<Ve
         BoundingBoxes: PR_MARITIME_BBOX,
         FilterMessageTypes: ['PositionReport', 'StandardClassBPositionReport', 'ShipStaticData'],
       }
-      console.log(`AISStream onopen — sending sub bbox=${JSON.stringify(PR_MARITIME_BBOX)} keylen=${apiKey.length}`)
       try {
         ws!.send(JSON.stringify(sub))
-        subscriptionSent = true
+        diagnostics.subscription_sent = true
       } catch (err) {
-        console.error(`send sub err: ${(err as Error).message}`)
+        diagnostics.socket_error = `send subscription: ${(err as Error).message}`
       }
     }
 
     ws.onerror = (ev) => {
       const e = ev as ErrorEvent
-      console.warn(`WebSocket error: type=${ev.type} msg=${e.message ?? 'none'}`)
+      diagnostics.socket_error = e.message ?? `event:${ev.type}`
     }
 
     ws.onclose = (ev) => {
-      console.log(`WebSocket closed: code=${ev.code} reason=${ev.reason ?? 'none'} wasClean=${ev.wasClean}`)
-      clearTimeout(timer)
+      diagnostics.close_code = ev.code
+      diagnostics.close_reason = ev.reason || null
       finalize()
     }
 
     ws.onmessage = (ev) => {
-      messagesReceived++
-      if (messagesReceived <= 3) {
-        const dataType = typeof ev.data
-        const preview = dataType === 'string' ? (ev.data as string).slice(0, 150) : `[${dataType}]`
-        console.log(`msg #${messagesReceived} type=${dataType} preview=${preview}`)
-      }
+      diagnostics.messages_received++
       if (Date.now() >= deadline) {
-        try { ws?.close() } catch (_) { /* noop */ }
+        finalize()
         return
       }
       try {
-        const raw = typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer)
+        const raw = typeof ev.data === 'string'
+          ? ev.data
+          : new TextDecoder().decode(ev.data as ArrayBuffer)
         const payload = JSON.parse(raw) as Record<string, unknown>
+
+        // AISStream devolve {"error": "..."} para chave invalida, quota
+        // estourada ou subscription malformada. Guardar o primeiro: e a
+        // resposta direta para "por que veio zero".
         if (payload.error) {
-          console.error(`AISStream err frame: ${JSON.stringify(payload.error)}`)
+          if (!diagnostics.first_error_frame) {
+            diagnostics.first_error_frame = String(
+              typeof payload.error === 'string' ? payload.error : JSON.stringify(payload.error),
+            ).slice(0, 500)
+          }
           return
         }
+
         const meta = (payload.MetaData as Record<string, unknown>) || {}
         const mmsi = meta.MMSI
         if (typeof mmsi !== 'number') return
@@ -251,114 +305,51 @@ async function collectVessels(apiKey: string, windowSeconds: number): Promise<Ve
           ingestStatic(snap, msgBody)
         }
       } catch (err) {
-        parseErrors++
-        if (parseErrors <= 2) console.warn(`parse err: ${(err as Error).message}`)
+        diagnostics.parse_errors++
+        if (diagnostics.parse_errors <= 2) console.warn(`parse err: ${(err as Error).message}`)
       }
     }
   })
 }
 
-interface InsertCounters {
-  inserted: number
-  skipped: number
-  errors: number
-}
-
-// deno-lint-ignore no-explicit-any
-async function insertWithDedupe(supabase: any, vessels: VesselSnapshot[]): Promise<InsertCounters> {
-  const counters: InsertCounters = { inserted: 0, skipped: 0, errors: 0 }
-  for (const v of vessels) {
-    const row = vesselToRow(v)
-    const { error } = await supabase.from('maritime_traffic').insert(row)
-    if (!error) {
-      counters.inserted++
-      continue
-    }
-    const msg = (error.message ?? '').toLowerCase()
-    if (msg.includes('duplicate key') || error.code === '23505') {
-      counters.skipped++
-    } else {
-      counters.errors++
-      console.error(`insert err: ${error.message}`)
-    }
-  }
-  return counters
-}
-
-// deno-lint-ignore no-explicit-any
-async function purgeOld(supabase: any) {
+async function purgeOld(client: SupabaseClient) {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
-  const { error } = await supabase.from('maritime_traffic').delete().lt('observed_at', cutoff)
+  const { error } = await client.from('maritime_traffic').delete().lt('observed_at', cutoff)
   if (error) console.warn(`purge err: ${error.message}`)
 }
 
-async function recordHealth(
-  // deno-lint-ignore no-explicit-any
-  supabase: any,
-  status: string,
-  total: number,
-  counters: InsertCounters,
-  durationMs: number,
-) {
-  const payload = {
-    cache_key: 'etl_health_maritimo',
-    data: {
-      last_run: new Date().toISOString(),
-      status,
-      total_vessels: total,
-      inserted: counters.inserted,
-      skipped_dup: counters.skipped,
-      errors: counters.errors,
-      duration_seconds: durationMs / 1000,
-      window_seconds: LISTEN_SECONDS,
-      runtime: 'supabase-edge',
-    },
-    source: 'etl_maritimo',
-    fetched_at: new Date().toISOString(),
-  }
-  const { error } = await supabase.from('data_cache').upsert(payload, { onConflict: 'cache_key' })
-  if (error) console.warn(`health err: ${error.message}`)
-}
+Deno.serve((req: Request) =>
+  runEtl(req, 'maritimo', async (client): Promise<RunResult> => {
+    const apiKey = Deno.env.get('AISSTREAM_API_KEY')
+    if (!apiKey) throw new Error('AISSTREAM_API_KEY nao configurado')
 
-Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+    const { vessels, diagnostics } = await collectVessels(apiKey, LISTEN_SECONDS)
 
-  const startMs = Date.now()
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const apiKey = Deno.env.get('AISSTREAM_API_KEY')
+    if (vessels.length === 0) {
+      return {
+        status: 'empty',
+        total_vessels: 0,
+        inserted: 0,
+        window_seconds: LISTEN_SECONDS,
+        diagnostics,
+      }
+    }
 
-  if (!apiKey) {
-    return new Response(
-      JSON.stringify({ status: 'error', error: 'AISSTREAM_API_KEY not configured' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    )
-  }
+    // maritime_traffic tem UNIQUE (mmsi, observed_at) e observed_at e truncado
+    // ao minuto, entao duas leituras do mesmo navio no mesmo minuto colidem.
+    // O upsert transforma essa colisao esperada em update, em vez do
+    // insert-e-conta-duplicata que a versao anterior fazia uma linha por vez.
+    const rows = vessels.map(vesselToRow)
+    const result = await batchUpsert(client, 'maritime_traffic', rows, 'mmsi,observed_at', 500)
+    await purgeOld(client)
 
-  const supabase = createClient(supabaseUrl, serviceKey)
-  const vessels = await collectVessels(apiKey, LISTEN_SECONDS)
-
-  if (vessels.length === 0) {
-    await recordHealth(supabase, 'empty', 0, { inserted: 0, skipped: 0, errors: 0 }, Date.now() - startMs)
-    return new Response(
-      JSON.stringify({ status: 'empty', total: 0 }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    )
-  }
-
-  const counters = await insertWithDedupe(supabase, vessels)
-  await purgeOld(supabase)
-
-  const status = counters.errors > counters.inserted ? 'error' : counters.errors > 0 ? 'partial' : 'success'
-  await recordHealth(supabase, status, vessels.length, counters, Date.now() - startMs)
-
-  return new Response(
-    JSON.stringify({
-      status,
+    return {
+      status: result.errors > 0 ? 'partial' : 'success',
       total_vessels: vessels.length,
-      ...counters,
-      duration_ms: Date.now() - startMs,
-    }),
-    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-  )
-})
+      inserted: result.inserted,
+      errors: result.errors,
+      window_seconds: LISTEN_SECONDS,
+      diagnostics,
+    }
+  })
+)

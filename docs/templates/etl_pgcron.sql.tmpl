@@ -1,0 +1,62 @@
+-- Template de migration pg_cron para uma Edge Function de ETL.
+--
+-- Uso: copiar para supabase/migrations/0NN_etl_<NOME>_pgcron.sql e substituir
+-- os placeholders. Nunca aplicar antes dos passos 5 e 7 do checklist de cutover
+-- (docs/PLANO_MIGRACAO_SUPABASE.md, secao 8).
+--
+-- Placeholders:
+--   {{NOME}}      nome do ETL sem prefixo (ex: escalation, cemaden)
+--   {{CRON}}      expressao cron (mesma do workflow do GitHub Actions)
+--   {{TIMEOUT}}   timeout_milliseconds: 2x o tempo tipico de execucao,
+--                 minimo 30000, teto util 400000 (wall-clock da Edge Function)
+--
+-- Depende da migration 034 (schema etl + etl.trigger_headers()).
+-- O token de disparo vem de vault.decrypted_secrets, nunca hardcoded aqui.
+
+-- Idempotente: permite reaplicar a migration sem duplicar o job.
+select cron.unschedule('etl-{{NOME}}')
+where exists (select 1 from cron.job where jobname = 'etl-{{NOME}}');
+
+select cron.schedule(
+  'etl-{{NOME}}',
+  '{{CRON}}',
+  $$
+  select net.http_post(
+    url     := 'https://fialxjcsgywvvuxjxcly.supabase.co/functions/v1/etl-{{NOME}}',
+    headers := etl.trigger_headers(),
+    body    := '{}'::jsonb,
+    timeout_milliseconds := {{TIMEOUT}}
+  ) as request_id;
+  $$
+);
+
+-- Passa o pipeline para o runtime Supabase nas views de frescor.
+update etl.expected_cadence
+   set runtime   = 'supabase-edge',
+       cron_expr = '{{CRON}}'
+ where etl_name  = '{{NOME}}';
+
+-- ---------------------------------------------------------------------------
+-- Variante A: cadencia sub-minuto (padrao da migration 031 do etl-aviacao)
+-- ---------------------------------------------------------------------------
+-- pg_cron nao vai abaixo de 1 minuto. Para cadencia menor, agendar N jobs no
+-- mesmo minuto com pg_sleep de offset:
+--
+-- select cron.schedule('etl-{{NOME}}-00', '* * * * *', $$ ... $$);
+-- select cron.schedule('etl-{{NOME}}-20', '* * * * *', $$ select pg_sleep(20); ... $$);
+--
+-- ---------------------------------------------------------------------------
+-- Variante B: execucao em lotes (ETLs que estouram o wall-clock de 400s)
+-- ---------------------------------------------------------------------------
+-- Dividir por query param e escalonar os schedules em minutos diferentes:
+--
+-- select cron.schedule('etl-{{NOME}}-b1', '0 8 * * 1', $$ ... /etl-{{NOME}}?batch=1 ... $$);
+-- select cron.schedule('etl-{{NOME}}-b2', '5 8 * * 1', $$ ... /etl-{{NOME}}?batch=2 ... $$);
+--
+-- ---------------------------------------------------------------------------
+-- Verificacao pos-aplicacao
+-- ---------------------------------------------------------------------------
+-- select jobid, jobname, schedule, active from cron.job order by jobname;
+-- select jobname, status, start_time, end_time
+--   from cron.job_run_details order by start_time desc limit 20;
+-- select * from public.etl_freshness where etl_name = '{{NOME}}';
