@@ -1,11 +1,11 @@
 # .github/workflows/cron-cemaden.yml
+# DEPRECATED: ETL cemaden migrada para Supabase Edge Function + pg_cron
+# (*/30). Ver supabase/functions/etl-cemaden/index.ts e migration
+# 037_etl_fase1_pgcron.sql. Mantido apenas como backup manual.
 # Fase 5.A — CEMADEN alertas geo/hidrologicos
-# Budget: ~2 min/dia (48 exec x ~2s) — maior frequencia porque o dado e critico
-name: ETL CEMADEN (alertas geo/hidrologicos)
+name: ETL CEMADEN (BACKUP — usar etl-cemaden edge function)
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'   # a cada 30 min
   workflow_dispatch:
 
 concurrency:

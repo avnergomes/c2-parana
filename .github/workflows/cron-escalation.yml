@@ -1,11 +1,11 @@
 # .github/workflows/cron-escalation.yml
-# Budget: ~24 min/dia (96 exec x ~15s)
+# DEPRECATED: ETL escalation migrada para Supabase Edge Function + pg_cron
+# (*/15). Ver supabase/functions/etl-escalation/index.ts e migration
+# 037_etl_fase1_pgcron.sql. Mantido apenas como backup manual.
 # Escalation automatica de incidentes por SLA (Fase 4.E)
-name: ETL Incident Escalation
+name: ETL Incident Escalation (BACKUP — usar etl-escalation edge function)
 
 on:
-  schedule:
-    - cron: '*/15 * * * *'   # A cada 15 minutos
   workflow_dispatch:
 
 env:

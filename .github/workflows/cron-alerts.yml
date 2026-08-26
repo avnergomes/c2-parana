@@ -1,9 +1,10 @@
 # .github/workflows/cron-alerts.yml
-name: ETL Alerts Engine (Avaliação de Regras)
+# DEPRECATED: ETL alerts migrada para Supabase Edge Function + pg_cron
+# (*/30). Ver supabase/functions/etl-alerts/index.ts e migration
+# 037_etl_fase1_pgcron.sql. Mantido apenas como backup manual.
+name: ETL Alerts Engine (BACKUP — usar etl-alerts edge function)
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'   # A cada 30 minutos
   workflow_dispatch:
 
 jobs:
