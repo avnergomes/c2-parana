@@ -28,8 +28,8 @@ mesmo ETL. O DataGeo PR consolida, normaliza e expõe esses dados como:
 |---|---|
 | Front | React 18 + Vite + TypeScript + Tailwind + Leaflet + Recharts |
 | Auth/BD | Supabase (Postgres + RLS + Realtime + Auth) |
-| ETLs | Python 3.11 (legado, em migração) → Supabase Edge Functions (Deno) |
-| Cron | pg_cron no Supabase (substitui GitHub Actions) |
+| ETLs | Supabase Edge Functions (Deno) — 18 pipelines; exceções em Python/Actions: datasus (pysus+DBC) e getec (pdfplumber) |
+| Cron | pg_cron no Supabase (substituiu GitHub Actions; monitor `etl-stale-monitor` + views `etl_freshness`/`etl_stale`) |
 | Pagamentos | Stripe (Checkout + Customer Portal + Webhook) |
 | Hospedagem do app | Vercel ou Cloudflare Pages em `app.datageoparana.com.br` (alvo) |
 | Hospedagem atual | GitHub Pages (`avnergomes.github.io/c2-parana/`) — em migração |
@@ -47,14 +47,18 @@ src/                React app (console)
   router/           AppRouter + ProtectedRoute
 
 supabase/
-  migrations/       33 migrations (numeradas)
+  migrations/       41 migrations (numeradas)
   functions/        Edge Functions:
-                      create-checkout, create-portal, stripe-webhook
-                      etl-aviacao, etl-clima, etl-maritimo, scrape-infohidro
-                      public-api  (nova — superfície SaaS)
+                      create-checkout, create-portal, stripe-webhook, public-api
+                      _shared/ (etl.ts, pr_municipios.ts, pr_centroids.ts)
+                      18 ETLs: aviacao, clima, escalation, alerts, cemaden,
+                      correlations, noticias, anomalies, irtc, dengue,
+                      situational, agua, ambiente, healthcare, legislativo,
+                      saude, agro, scrape-infohidro (+ maritimo, cron suspenso)
 
-scripts/            21 ETLs Python (legado, em migração p/ Edge Functions)
-.github/workflows/  23 workflows (legado, sendo descomissionados conforme ETLs migram)
+scripts/            21 ETLs Python (backup manual pós-migração; datasus e
+                    getec_* seguem ativos no Actions — exceções técnicas)
+.github/workflows/  23 workflows (padrão BACKUP conforme cutover avança)
 docs/               PIVOT.md, SETUP_STRIPE.md, archive/
 ```
 

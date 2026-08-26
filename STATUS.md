@@ -1,6 +1,32 @@
 # DataGeo PR — Status de Implementação (ex-c2-parana)
 
-**Última atualização:** 2026-08-07
+**Última atualização:** 2026-08-25
+
+> **2026-08-25 — Migração dos ETLs para Supabase: Fases 2 a 5 implementadas.**
+> Todo o restante do plano (`docs/PLANO_MIGRACAO_SUPABASE.md`) foi executado
+> em código nesta data:
+>
+> - **Fase 1 passo 8 fechado:** após 18 dias de observação saudável, os
+>   workflows de escalation, alerts e cemaden viraram BACKUP (sem `schedule`).
+> - **Fases 2-4 portadas (13 Edge Functions, type-check limpo):** correlations,
+>   noticias, anomalies, irtc, dengue, situational (Fase 2); agua, ambiente,
+>   healthcare, legislativo, saude (com `?mode=fast|full` e `?batch=1|2|3`) e
+>   scrape-infohidro reescrita por completo (10 seções) (Fase 3); agro (Fase 4).
+>   Módulos novos: `_shared/pr_centroids.ts` (399 centróides p/ matching FIRMS).
+> - **Migrations 039-041 escritas:** crons pg_cron das 3 fases + job
+>   `etl-stale-monitor` (alerta horário de pipeline atrasado, DB-only).
+> - **Spike GETEC inconclusivo** (credenciais locais rejeitadas — ver P0#1);
+>   etl_getec_* permanecem no Actions como exceção junto com datasus.
+> - **PENDENTE DO USUÁRIO:** deploy das 13 funções + `db push` (classificador
+>   de permissões bloqueia; comandos prontos na seção "CUTOVER PENDENTE" do
+>   plano). Depois de 24-48 h de observação, desligar o `schedule` dos
+>   workflows das Fases 2-4.
+>
+> Runtime alvo ao fim do cutover: **18 pipelines em Supabase Edge + pg_cron**;
+> exceções permanentes no Actions: datasus, getec_atendimentos, getec_extensao;
+> maritimo deployado com cron suspenso (conta AISStream cortada).
+
+**Última atualização anterior:** 2026-08-07
 
 > **2026-08-07 — Migração dos ETLs para Supabase, fases 0 e 1.** O outage major
 > do GitHub Actions em 2026-08-06 (nenhum job conseguia runner por ~3 h) parou
