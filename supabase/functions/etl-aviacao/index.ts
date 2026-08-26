@@ -1,5 +1,9 @@
 // supabase/functions/etl-aviacao/index.ts
-// Aviation traffic ETL: airplanes.live -> aviation_traffic.
+// Aviation traffic ETL: adsb.lol -> aviation_traffic.
+//
+// 2026-08-26: fonte trocada de airplanes.live (passou a responder 403
+// "contact us" em 2026-08-12 e matou o feed) para adsb.lol, que expoe a
+// MESMA API v2/readsb (ac[]) e e aberta por politica (sem chave).
 //
 // Equivalente Deno do scripts/etl_aviacao.py. Roda em Supabase Edge
 // Runtime, agendado via pg_cron + pg_net a cada 1min (mais confiavel
@@ -18,7 +22,7 @@ import {
 const PR_CENTER_LAT = -24.89
 const PR_CENTER_LON = -51.55
 const RADIUS_NM = 250
-const URL = `https://api.airplanes.live/v2/point/${PR_CENTER_LAT}/${PR_CENTER_LON}/${RADIUS_NM}`
+const URL = `https://api.adsb.lol/v2/lat/${PR_CENTER_LAT}/lon/${PR_CENTER_LON}/dist/${RADIUS_NM}`
 const USER_AGENT = 'c2-parana/1.0 (+https://github.com/avnergomes/c2-parana)'
 const RETENTION_DAYS = 7
 
@@ -121,7 +125,7 @@ function parseAircraft(rec: Record<string, unknown>, snapshotIso: string): Aircr
     on_ground: onGround,
     squawk: typeof rec.squawk === 'string' ? rec.squawk : null,
     category: parseCategory(rec.category),
-    source: 'airplanes.live',
+    source: 'adsb.lol',
     observed_at: observedAt,
   }
 }
@@ -140,7 +144,7 @@ async function fetchAirplanesLive(): Promise<AircraftRecord[]> {
         continue
       }
       if (!resp.ok) {
-        console.error(`airplanes.live HTTP ${resp.status}`)
+        console.error(`adsb.lol HTTP ${resp.status}`)
         return []
       }
       const payload = (await resp.json()) as { ac?: Array<Record<string, unknown>> }
@@ -151,14 +155,14 @@ async function fetchAirplanesLive(): Promise<AircraftRecord[]> {
         const p = parseAircraft(rec, snapshotIso)
         if (p) parsed.push(p)
       }
-      console.log(`airplanes.live: ${ac.length} received, ${parsed.length} valid`)
+      console.log(`adsb.lol: ${ac.length} received, ${parsed.length} valid`)
       return parsed
     } catch (err) {
       console.warn(`fetch attempt ${attempt + 1} failed: ${(err as Error).message}`)
       await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
     }
   }
-  console.error('airplanes.live failed after 3 retries')
+  console.error('adsb.lol failed after 3 retries')
   return []
 }
 
@@ -182,7 +186,7 @@ Deno.serve((req: Request) =>
   runEtl(req, 'aviacao', async (client): Promise<RunResult> => {
     const states = await fetchAirplanesLive()
     if (states.length === 0) {
-      return { status: 'empty', total_received: 0, inserted: 0, source: 'airplanes.live' }
+      return { status: 'empty', total_received: 0, inserted: 0, source: 'adsb.lol' }
     }
 
     // aviation_traffic tem UNIQUE (icao24, observed_at). O dedupe em memoria ja
@@ -204,7 +208,7 @@ Deno.serve((req: Request) =>
       deduped: deduped.length,
       inserted: result.inserted,
       errors: result.errors,
-      source: 'airplanes.live',
+      source: 'adsb.lol',
     }
   })
 )
