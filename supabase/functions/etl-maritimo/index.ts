@@ -23,6 +23,7 @@ import {
   type RunResult,
   type SupabaseClient,
 } from '../_shared/etl.ts'
+import { frameToText } from './frame.ts'
 
 const AISSTREAM_URL = 'wss://stream.aisstream.io/v0/stream'
 // BBox costa PR + aproximacao Atlantica (identica a do ETL Python)
@@ -84,6 +85,7 @@ interface StreamDiagnostics {
   close_code: number | null
   close_reason: string | null
   first_error_frame: string | null
+  first_parse_error: string | null
   socket_error: string | null
 }
 
@@ -202,6 +204,7 @@ function collectVessels(
       close_code: null,
       close_reason: null,
       first_error_frame: null,
+      first_parse_error: null,
       socket_error: null,
     }
 
@@ -229,6 +232,11 @@ function collectVessels(
 
     try {
       ws = new WebSocket(AISSTREAM_URL)
+      // A AISStream manda os JSON em quadros BINARIOS. No Deno o default de
+      // binaryType e 'blob', e TextDecoder.decode(Blob) lanca: foi o que zerou
+      // esta funcao (diagnostico 2026-09-13: 2.423/2.423 parse_errors com a
+      // bbox mundial). ArrayBuffer e decodificavel direto.
+      ws.binaryType = 'arraybuffer'
     } catch (err) {
       diagnostics.socket_error = (err as Error).message
       finalize()
@@ -260,16 +268,14 @@ function collectVessels(
       finalize()
     }
 
-    ws.onmessage = (ev) => {
+    ws.onmessage = async (ev) => {
       diagnostics.messages_received++
       if (Date.now() >= deadline) {
         finalize()
         return
       }
       try {
-        const raw = typeof ev.data === 'string'
-          ? ev.data
-          : new TextDecoder().decode(ev.data as ArrayBuffer)
+        const raw = await frameToText(ev.data)
         const payload = JSON.parse(raw) as Record<string, unknown>
 
         // AISStream devolve {"error": "..."} para chave invalida, quota
@@ -310,6 +316,9 @@ function collectVessels(
         }
       } catch (err) {
         diagnostics.parse_errors++
+        if (!diagnostics.first_parse_error) {
+          diagnostics.first_parse_error = String((err as Error).message ?? err).slice(0, 300)
+        }
         if (diagnostics.parse_errors <= 2) console.warn(`parse err: ${(err as Error).message}`)
       }
     }
