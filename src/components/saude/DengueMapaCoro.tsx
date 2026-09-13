@@ -8,7 +8,10 @@ import type { Feature, GeoJsonObject } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 
 const PR_CENTER: [number, number] = [-24.89, -51.55]
-const DARK_TILE = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+// Esri World Dark Gray Canvas (sem API key)
+const DARK_TILE =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+const TILE_ATTRIBUTION = 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
 
 export function DengueMapaCoro() {
   const { data: dengueData } = useDengueAtual()
@@ -58,7 +61,11 @@ export function DengueMapaCoro() {
         dragging={false}
         scrollWheelZoom={false}
       >
-        <TileLayer url={DARK_TILE} attribution="" />
+        <TileLayer
+          url={DARK_TILE}
+          attribution={TILE_ATTRIBUTION}
+          maxNativeZoom={16}
+        />
         {geoJSON && <GeoJSON key="dengue-coro" data={geoJSON as GeoJsonObject} style={getStyle} />}
       </MapContainer>
 

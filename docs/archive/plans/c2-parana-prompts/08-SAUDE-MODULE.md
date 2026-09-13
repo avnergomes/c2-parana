@@ -212,7 +212,9 @@ import type { Feature } from 'geojson'
 import 'leaflet/dist/leaflet.css'
 
 const PR_CENTER: [number, number] = [-24.89, -51.55]
-const DARK_TILE = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+// Esri World Dark Gray Canvas (sem API key)
+const DARK_TILE =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
 
 export function DengueMapaCoro() {
   const { data: dengueData } = useDengueAtual()

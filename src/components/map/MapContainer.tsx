@@ -30,9 +30,11 @@ import { useAuth } from '@/contexts/AuthContext'
 const PR_CENTER: [number, number] = [-24.89, -51.55]
 const PR_BOUNDS: [[number, number], [number, number]] = [[-26.7, -54.6], [-22.5, -48.0]]
 
-// Tile escuro via CartoDB
-const DARK_TILE = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-const TILE_ATTRIBUTION = '&copy; OpenStreetMap &copy; CARTO'
+// Tile escuro via Esri World Dark Gray Canvas (sem API key)
+const DARK_TILE =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+const TILE_ATTRIBUTION = 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+const TILE_MAX_NATIVE_ZOOM = 16
 
 const BASE_STYLE = {
   fillColor: '#1f2937',
@@ -162,7 +164,11 @@ export function MapModule() {
           <ZoomControl position="bottomright" />
 
           {/* Tile escuro */}
-          <TileLayer url={DARK_TILE} attribution={TILE_ATTRIBUTION} />
+          <TileLayer
+            url={DARK_TILE}
+            attribution={TILE_ATTRIBUTION}
+            maxNativeZoom={TILE_MAX_NATIVE_ZOOM}
+          />
 
           {/* Municípios base (sempre visível) — com tooltips */}
           {geoJSON && (

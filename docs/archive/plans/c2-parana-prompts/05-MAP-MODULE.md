@@ -563,9 +563,10 @@ import { useAuth } from '@/contexts/AuthContext'
 const PR_CENTER: [number, number] = [-24.89, -51.55]
 const PR_BOUNDS: [[number, number], [number, number]] = [[-26.7, -54.6], [-22.5, -48.0]]
 
-// Tile escuro via CartoDB
-const DARK_TILE = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-const TILE_ATTRIBUTION = '&copy; OpenStreetMap &copy; CARTO'
+// Tile escuro via Esri World Dark Gray Canvas (sem API key)
+const DARK_TILE =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}'
+const TILE_ATTRIBUTION = 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
 
 export function MapPage() {
   const { activeLayers, selectedMunicipality, toggleLayer, selectMunicipality } = useMapState()
@@ -763,7 +764,7 @@ public/data/municipios-pr.geojson         (BAIXADO do IBGE)
 
 ## Notas Técnicas
 
-- **Tile dark mode**: Usando CartoDB Dark Matter (`dark_all`) — não precisa de API key para uso básico. Alternativa: Stadia Maps Alidade Smooth Dark (requer key gratuita).
+- **Tile dark mode**: Usando Esri World Dark Gray Canvas (`Canvas/World_Dark_Gray_Base`), servido pelo ArcGIS Online sem API key. Atenção ao template de URL do Esri, que é `{z}/{y}/{x}` (Y antes de X), e ao zoom nativo máximo 16 desse serviço: use `maxNativeZoom: 16` se o mapa passar do zoom 16. Para rótulos, sobrepor `Canvas/World_Dark_Gray_Reference`. Não usar CartoDB nem Stadia Maps (este último exige key).
 - **GeoJSON do IBGE**: Resolução 5 é simplificada (~500KB). Resolução 2 é mais detalhada (~2MB). Para MVP, usar resolução 5.
 - **Performance**: Para 399 municípios, o GeoJSON raw pode ter 1-2MB. Gzip reduz para ~300KB. O `staleTime: Infinity` evita refetch desnecessário.
 - **Layers pro bloqueadas**: O LayerToggle mostra as camadas pro como desabilitadas visualmente. Mesmo que o usuário manipule a URL manualmente, os dados não são carregados pois `isPro` é false.
