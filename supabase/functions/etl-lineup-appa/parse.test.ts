@@ -80,6 +80,10 @@ Deno.test('todo berço atracado do fixture tem posição; fundeio é determinís
     assert(berthPosition(v.berco), `berço sem coordenada: ${v.berco}`)
   }
   assertEquals(berthPosition('999'), null)
+  assertEquals(berthPosition('216')?.rumo, 82)
+  assertEquals(berthPosition('141')?.rumo, 320)
+  assertEquals(anchoragePosition(0).rumo, null)
+  for (const b of Object.values(BERTHS)) assert(b.rumo >= 0 && b.rumo < 360, 'rumo fora de 0-360')
   assertEquals(berthPosition('200a')?.local, 'Berço 200A · Píer FOSPAR (Paranaguá)')
   assertEquals(anchoragePosition(7), anchoragePosition(7))
   const pts = new Set(Array.from({ length: 40 }, (_, i) => `${anchoragePosition(i).lat},${anchoragePosition(i).lon}`))

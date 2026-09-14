@@ -15,27 +15,30 @@ export interface BerthInfo {
   lat: number
   lon: number
   local: string
+  /** Rumo (graus a partir do norte) do eixo do cais/píer: navio atracado fica paralelo a ele. */
+  rumo: number
 }
 
 const CAIS = 'Cais comercial de Paranaguá'
-const CAIS_POS: Array<[number, number]> = [
-  [-25.50147, -48.52546], [-25.50162, -48.52365], [-25.50176, -48.52185], [-25.50191, -48.52005],
-  [-25.50205, -48.51825], [-25.5022, -48.51645], [-25.50235, -48.51464], [-25.50216, -48.51285],
-  [-25.50196, -48.51105], [-25.50176, -48.50926], [-25.50157, -48.50746], [-25.50137, -48.50566],
-  [-25.50116, -48.50387], [-25.50092, -48.50208], [-25.50069, -48.50029], [-25.50046, -48.4985],
-  [-25.50022, -48.49671], [-25.49999, -48.49492], [-25.49957, -48.49317],
+// [lat, lon, rumo]: rumo pelos berços vizinhos ao longo da face do cais.
+const CAIS_POS: Array<[number, number, number]> = [
+  [-25.50147, -48.52546, 95], [-25.50162, -48.52365, 95], [-25.50176, -48.52185, 95], [-25.50191, -48.52005, 95],
+  [-25.50205, -48.51825, 95], [-25.5022, -48.51645, 95], [-25.50235, -48.51464, 89], [-25.50216, -48.51285, 83],
+  [-25.50196, -48.51105, 83], [-25.50176, -48.50926, 83], [-25.50157, -48.50746, 83], [-25.50137, -48.50566, 83],
+  [-25.50116, -48.50387, 82], [-25.50092, -48.50208, 82], [-25.50069, -48.50029, 82], [-25.50046, -48.4985, 82],
+  [-25.50022, -48.49671, 82], [-25.49999, -48.49492, 79], [-25.49957, -48.49317, 75],
 ]
 
 export const BERTHS: Readonly<Record<string, BerthInfo>> = Object.freeze({
-  ...Object.fromEntries(CAIS_POS.map(([lat, lon], i) => [String(201 + i), { lat, lon, local: CAIS }])),
-  '141': { lat: -25.50275, lon: -48.53556, local: 'Píer de inflamáveis (Paranaguá)' },
-  '142': { lat: -25.50219, lon: -48.53609, local: 'Píer de inflamáveis (Paranaguá)' },
-  '143': { lat: -25.50163, lon: -48.53661, local: 'Píer de inflamáveis (Paranaguá)' },
-  '144': { lat: -25.50108, lon: -48.53714, local: 'Píer de inflamáveis (Paranaguá)' },
-  '200': { lat: -25.50344, lon: -48.54265, local: 'Píer FOSPAR (Paranaguá)' },
-  '200A': { lat: -25.50178, lon: -48.54458, local: 'Píer FOSPAR (Paranaguá)' },
-  '113': { lat: -25.45681, lon: -48.67507, local: 'Ponta do Félix (Antonina)' },
-  '114': { lat: -25.45751, lon: -48.6743, local: 'Ponta do Félix (Antonina)' },
+  ...Object.fromEntries(CAIS_POS.map(([lat, lon, rumo], i) => [String(201 + i), { lat, lon, rumo, local: CAIS }])),
+  '141': { lat: -25.50275, lon: -48.53556, rumo: 320, local: 'Píer de inflamáveis (Paranaguá)' },
+  '142': { lat: -25.50219, lon: -48.53609, rumo: 320, local: 'Píer de inflamáveis (Paranaguá)' },
+  '143': { lat: -25.50163, lon: -48.53661, rumo: 320, local: 'Píer de inflamáveis (Paranaguá)' },
+  '144': { lat: -25.50108, lon: -48.53714, rumo: 320, local: 'Píer de inflamáveis (Paranaguá)' },
+  '200': { lat: -25.50344, lon: -48.54265, rumo: 314, local: 'Píer FOSPAR (Paranaguá)' },
+  '200A': { lat: -25.50178, lon: -48.54458, rumo: 314, local: 'Píer FOSPAR (Paranaguá)' },
+  '113': { lat: -25.45681, lon: -48.67507, rumo: 135, local: 'Ponta do Félix (Antonina)' },
+  '114': { lat: -25.45751, lon: -48.6743, rumo: 135, local: 'Ponta do Félix (Antonina)' },
 })
 
 /** Centróides dos fundeadouros usados para navios "ao largo" (baía, fora do canal interno). */
@@ -52,13 +55,17 @@ export interface VesselPosition {
   lon: number
   tipo: 'berco' | 'fundeio'
   local: string
+  /** Rumo do eixo do navio em graus; null quando desconhecido (fundeio). */
+  rumo: number | null
 }
 
 /** Posição de navio atracado pelo número do berço; null se o berço não é conhecido. */
 export function berthPosition(berco: string | null | undefined): VesselPosition | null {
   const key = String(berco ?? '').trim().toUpperCase()
   const info = BERTHS[key]
-  return info ? { lat: info.lat, lon: info.lon, tipo: 'berco', local: `Berço ${key} · ${info.local}` } : null
+  return info
+    ? { lat: info.lat, lon: info.lon, tipo: 'berco', local: `Berço ${key} · ${info.local}`, rumo: info.rumo }
+    : null
 }
 
 /**
@@ -76,5 +83,7 @@ export function anchoragePosition(index: number): VesselPosition {
     lon: Number((area.lon + radiusDeg * Math.cos(angle)).toFixed(5)),
     tipo: 'fundeio',
     local: `Área de fundeio ${area.nome} (posição ilustrativa)`,
+    // Navio fundeado gira com maré e vento: rumo desconhecido.
+    rumo: null,
   }
 }
