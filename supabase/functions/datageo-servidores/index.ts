@@ -28,7 +28,9 @@ const MIN_SERVIDORES = 1000
 
 async function lerSispont(): Promise<Record<string, string>[]> {
   const relat = await fetchWithRetry(`${SISPONT_BASE}/relat.php`, { timeoutMs: 60_000, retries: 2 })
-  await relat.body?.cancel()
+  // Ler a página até o fim: cortar a conexão interrompe o PHP no meio da
+  // gravação do dados.csv (testado: 297 linhas em vez de 1.593).
+  await relat.arrayBuffer()
   if (!relat.ok) throw new Error(`SisPont relat.php: HTTP ${relat.status}`)
   const csv = await fetchText(`${SISPONT_BASE}/dados.csv`, { timeoutMs: 30_000, retries: 3, charset: 'windows-1252' })
   return parseSemicolonCsv(csv, SISPONT_COLS)
