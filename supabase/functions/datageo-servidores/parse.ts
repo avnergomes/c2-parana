@@ -100,6 +100,26 @@ export function limpaEspecialidade(s: string): string {
   return (m ? m[1] : v).trim()
 }
 
+// Cargo do Portal -> formação no vocabulário do SisPont, para a ficha agrupar
+// "Engenheiro Agronomo" (Portal) com "Engenharia Agronômica" (SisPont).
+const CARGO_FORMACAO: Record<string, string> = {
+  'ENGENHEIRO AGRONOMO': 'Engenharia Agronômica',
+  'TECNICO AGRICOLA': 'Técnico Agrícola/Agropecuário',
+  'MEDICO VETERINARIO': 'Medicina Veterinária',
+  'ZOOTECNISTA': 'Zootecnia',
+  'ENGENHEIRO FLORESTAL': 'Engenharia Florestal',
+  'ENGENHEIRO DE PESCA': 'Engenharia de Pesca',
+  'ENGENHEIRO DE ALIMENTOS': 'Engenharia de Alimentos',
+  'ECONOMISTA DOMESTICA': 'Economia Doméstica',
+  'ECONOMIA DOMESTICA': 'Economia Doméstica',
+  'ASSISTENTE SOCIAL': 'Serviço Social',
+}
+
+/** Cargo do Portal como formação: vocabulário do SisPont quando há par, senão Título. */
+export function formacaoDoCargo(s: string): string {
+  return CARGO_FORMACAO[norm(s)] ?? tituloCargo(s)
+}
+
 /** "ENGENHEIRO AGRONOMO" -> "Engenheiro Agronomo" (o Portal vem sem acento em parte dos cargos). */
 export function tituloCargo(s: string): string {
   const minusculas = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'com'])
@@ -165,7 +185,7 @@ export function buildServidores(sispont: Record<string, string>[], portal: Map<s
     const municipio = valor(r.MUNICIPIO)
     const p = casaPortal(portal, nome, municipio)
     const esp = limpaEspecialidade(r.ESPECIALIDADE)
-    const formacao = esp || (p?.cargo ? tituloCargo(p.cargo) : '')
+    const formacao = esp || (p?.cargo ? formacaoDoCargo(p.cargo) : '')
     const diretoria = valor(r.DIRETORIA)
     out.push({
       id: valor(r.ID),

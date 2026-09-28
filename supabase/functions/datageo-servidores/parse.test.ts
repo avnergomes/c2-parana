@@ -2,7 +2,7 @@
 // Fixture sintética: nomes e números inventados (nada de dado real no repo).
 import { assertEquals } from 'jsr:@std/assert@1'
 import {
-  buildServidores, casaPortal, indexaPortal, isExtensionista, limpaEspecialidade, norm,
+  buildServidores, casaPortal, formacaoDoCargo, indexaPortal, isExtensionista, limpaEspecialidade, norm,
   parseSemicolonCsv, PORTAL_COLS, SISPONT_COLS, tituloCargo, unidadeDe,
 } from './parse.ts'
 
@@ -56,6 +56,8 @@ Deno.test('limpaEspecialidade e tituloCargo', () => {
   assertEquals(limpaEspecialidade('.'), '')
   assertEquals(tituloCargo('ENGENHEIRO AGRONOMO'), 'Engenheiro Agronomo')
   assertEquals(tituloCargo('GRADUAÇÃO COM DOUTORADO'), 'Graduação com Doutorado')
+  assertEquals(formacaoDoCargo('TECNICO AGRICOLA'), 'Técnico Agrícola/Agropecuário')
+  assertEquals(formacaoDoCargo('GRADUAÇÃO SUPERIOR'), 'Graduação Superior')
 })
 
 Deno.test('isExtensionista: só Extensão Rural, sem apoio administrativo', () => {
@@ -83,7 +85,7 @@ Deno.test('buildServidores: minimiza, enriquece e descarta linhas de controle', 
   assertEquals(fulana.formacao, 'Engenharia Agronômica')
   assertEquals(fulana.formacao_fonte, 'sispont')
   assertEquals(ciclano.municipio, 'Guarapuava')
-  assertEquals(ciclano.formacao, 'Engenheiro Agronomo')
+  assertEquals(ciclano.formacao, 'Engenharia Agronômica') // mesmo grupo do SisPont
   assertEquals(ciclano.formacao_fonte, 'portal')
   assertEquals(ciclano.admissao, '1990-01-02')
   assertEquals(ciclano.extensionista, true)
