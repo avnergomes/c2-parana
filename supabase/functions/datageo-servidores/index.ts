@@ -9,13 +9,17 @@
 //   - Portal da Transparência PR: RELACAO_SERVIDORES.zip (TB_RH.csv, todos os
 //     órgãos, regerado 1x/dia ~05:44). Sem ele a função publica só o SisPont
 //     (status partial).
+//   - Relação do RH (servidores-rh.json no mesmo bucket, mensal, publicada
+//     pelo datageo-command): fonte de verdade sobre quadro, município, vínculo
+//     e cessão. Ausente ou inválida -> segue só com SisPont + Portal.
 //
 // Schedule: pg_cron de hora em hora (migration 046). Parser em parse.ts.
 
 import { unzipSync } from 'https://esm.sh/fflate@0.8.2'
 import { fetchText, fetchWithRetry, runEtl, type RunResult } from '../_shared/etl.ts'
 import {
-  buildServidores, indexaPortal, parseSemicolonCsv, PORTAL_COLS, SISPONT_COLS, type PortalRow,
+  aplicaRh, buildServidores, indexaPortal, parseSemicolonCsv, PORTAL_COLS, SISPONT_COLS, type PortalRow, type Rh,
+  validaRh,
 } from './parse.ts'
 
 const SISPONT_BASE = 'http://200.201.27.34/IDR-SisPont/gap/configuracao/share'
@@ -23,6 +27,7 @@ const PORTAL_ZIP =
   'https://www.transparencia.download.pr.gov.br/exportacao/RELACAO_SERVIDORES/RELACAO_SERVIDORES.zip'
 const BUCKET = 'datageo-privado'
 const ARQUIVO = 'servidores-idr.json'
+const ARQUIVO_RH = 'servidores-rh.json'
 // Abaixo disso o SisPont devolveu algo quebrado: mantém o arquivo anterior.
 const MIN_SERVIDORES = 1000
 
@@ -49,6 +54,18 @@ async function lerPortal(): Promise<Map<string, PortalRow[]>> {
   return indexaPortal(parseSemicolonCsv([header, ...idr].join('\n'), PORTAL_COLS))
 }
 
+// deno-lint-ignore no-explicit-any
+async function lerRh(client: any): Promise<Rh | null> {
+  const { data, error } = await client.storage.from(BUCKET).download(ARQUIVO_RH)
+  if (error || !data) {
+    console.warn(`datageo_servidores: ${ARQUIVO_RH} indisponível: ${error?.message ?? 'vazio'}`)
+    return null
+  }
+  const rh = validaRh(JSON.parse(await data.text()))
+  if (!rh) console.warn(`datageo_servidores: ${ARQUIVO_RH} em formato inesperado, ignorado`)
+  return rh
+}
+
 Deno.serve((req: Request) =>
   runEtl(req, 'datageo_servidores', async (client): Promise<RunResult> => {
     const sispont = await lerSispont()
@@ -61,7 +78,14 @@ Deno.serve((req: Request) =>
       console.warn(`datageo_servidores: portal indisponível: ${portalErro}`)
     }
 
-    const servidores = buildServidores(sispont, portal)
+    let rh: Rh | null = null
+    try {
+      rh = await lerRh(client)
+    } catch (err) {
+      console.warn(`datageo_servidores: RH ilegível: ${(err as Error).message}`)
+    }
+
+    const servidores = aplicaRh(buildServidores(sispont, portal), rh)
     if (servidores.length < MIN_SERVIDORES) {
       throw new Error(`SisPont com ${servidores.length} servidores (< ${MIN_SERVIDORES}); arquivo anterior mantido`)
     }
@@ -71,6 +95,7 @@ Deno.serve((req: Request) =>
       fontes: {
         sispont: 'IDR-SisPont (relatório de servidores)',
         portal: portalErro ? null : 'Portal da Transparência PR, Relação de Servidores',
+        rh: rh ? `${rh.fonte}, ${rh.referencia}` : null,
       },
       servidores,
     }
@@ -91,6 +116,8 @@ Deno.serve((req: Request) =>
       sem_formacao: servidores.filter((s) => !s.formacao).length,
       em_unidades: servidores.filter((s) => s.unidade).length,
       portal_erro: portalErro,
+      rh: rh?.referencia ?? null,
+      fora_rh: rh ? servidores.filter((s) => !s.rh).length : null,
     }
   })
 )

@@ -2,8 +2,8 @@
 // Fixture sintética: nomes e números inventados (nada de dado real no repo).
 import { assertEquals } from 'jsr:@std/assert@1'
 import {
-  buildServidores, casaPortal, formacaoDoCargo, indexaPortal, isExtensionista, limpaEspecialidade, norm,
-  parseSemicolonCsv, PORTAL_COLS, SISPONT_COLS, tituloCargo, unidadeDe,
+  aplicaRh, buildServidores, casaPortal, formacaoDoCargo, indexaPortal, isExtensionista, limpaEspecialidade, norm,
+  parseSemicolonCsv, PORTAL_COLS, SISPONT_COLS, tituloCargo, unidadeDe, validaRh,
 } from './parse.ts'
 
 const SISPONT = [
@@ -98,4 +98,38 @@ Deno.test('buildServidores: minimiza, enriquece e descarta linhas de controle', 
   for (const proibido of ['11111111', 'BELTRANO', 'Chefia', 'RG']) {
     assertEquals(json.includes(proibido), false, proibido)
   }
+})
+
+Deno.test('aplicaRh: RH manda em quadro, município, vínculo e cessão', () => {
+  const rh = {
+    referencia: 'Setembro/2026', fonte: 'RH',
+    ativos: [
+      { id: '900001', nome: 'FULANA DE TAL', municipio: 'Pitanga', lotacao: 'U.M. PITANGA', ocupacao: 'ENGENHEIRO AGRÔNOMO', vinculo: 'QPIDR/QPEM', cedido_para: '', area: 'DER', admissao: '2010-01-01' },
+      { id: '1234', nome: 'CICLANO SILVA', municipio: 'Curitiba', lotacao: 'À DISPOSIÇÃO - SEAB/CURITIBA', ocupacao: 'ENGENHEIRO AGRÔNOMO', vinculo: 'CLT/EMATER', cedido_para: 'SEAB', area: 'OO', admissao: '1990-01-02' },
+      { id: '7777', nome: 'JOAO AUXILIAR', municipio: 'Lapa', lotacao: 'U.M. LAPA', ocupacao: 'ASSISTENTE ADMINISTRATIVO', vinculo: 'CC', cedido_para: '', area: 'DER', admissao: '2025-09-01' },
+      { id: '8888', nome: 'NOVO PSS', municipio: 'Irati', lotacao: 'U.M. IRATI', ocupacao: 'ENGENHEIRO AGRÔNOMO', vinculo: 'PSS', cedido_para: '', area: 'DER', admissao: '2026-08-03' },
+      { id: '8889', nome: 'JOVEM APRENDIZ', municipio: 'Curitiba', lotacao: 'SEDE', ocupacao: 'MENOR APRENDIZ', vinculo: 'MENOR APRENDIZ', cedido_para: '', area: 'DER', admissao: '2026-07-27' },
+    ],
+    desligados: ['900002'],
+  }
+  assertEquals(validaRh(rh), rh)
+  assertEquals(validaRh({ ativos: 'x' }), null)
+  assertEquals(aplicaRh(servidores(), null), servidores())
+
+  const s = aplicaRh(servidores(), rh)
+  const por = Object.fromEntries(s.map((x) => [x.id, x]))
+  assertEquals(Object.keys(por).sort(), ['1234', '1236', '7777', '8888', '8889', '900001'])
+  assertEquals(por['900001'].extensionista, true)
+  assertEquals(por['900001'].rh, true)
+  // Cedido: município real do RH, fora da contagem de extensionistas.
+  assertEquals([por['1234'].municipio, por['1234'].cedido_para, por['1234'].extensionista], ['Curitiba', 'SEAB', false])
+  // Matrícula diferente no SisPont: casa pelo nome e assume a do RH.
+  assertEquals([por['7777'].vinculo, por['7777'].setor], ['CC', 'Unidade Municipal'])
+  // Desligado no RH sai (900002); só no SisPont fica marcado.
+  assertEquals(por['1236'].rh, false)
+  // Ativo só no RH entra com lotação e diretoria da planilha.
+  assertEquals(por['8888'].diretoria, 'Diretoria de Extensao Rural')
+  assertEquals(por['8888'].formacao, 'Engenharia Agronômica')
+  assertEquals(por['8888'].extensionista, true)
+  assertEquals(por['8889'].extensionista, false)
 })
