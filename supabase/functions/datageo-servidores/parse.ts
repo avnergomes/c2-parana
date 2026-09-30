@@ -130,7 +130,7 @@ export function tituloCargo(s: string): string {
 
 // Formações de apoio (administrativo/operacional): não contam como técnico
 // extensionista, mesmo lotadas na Diretoria de Extensão Rural.
-const NAO_TECNICO = /ADMINISTRATIV|ADMINISTRADOR|OPERACIONAL|OPERARIO|OPERADOR|CAPATAZ|^AUX|MOTORISTA|TRATORISTA|MECANICO|LIMPEZA|SERVICOS GERAIS|VIGIA|COPEIR|CONTADOR|PSICOLOG|TELEFONISTA|DATILOGRAF|SECRETARI|RECEPCIONISTA|ALMOXARIF|ZELADOR|PROGRAMADOR|AGENTE DE APOIO/
+const NAO_TECNICO = /ADMINISTRATIV|ADMINISTRADOR|OPERACIONAL|OPERARIO|OPERADOR|CAPATAZ|^AUX|MOTORISTA|TRATORISTA|MECANICO|LIMPEZA|SERVICOS GERAIS|VIGIA|COPEIR|CONTADOR|PSICOLOG|TELEFONISTA|DATILOGRAF|SECRETARI|RECEPCIONISTA|ALMOXARIF|ZELADOR|PROGRAMADOR|AGENTE DE APOIO|APRENDIZ|ESTAGIARI/
 
 export function isExtensionista(diretoria: string, formacao: string): boolean {
   if (!norm(diretoria).startsWith('DIRETORIA DE EXTENSAO RURAL')) return false
@@ -168,12 +168,17 @@ export interface Servidor {
   setor: string
   diretoria: string
   formacao: string
-  formacao_fonte: 'sispont' | 'portal' | null
+  formacao_fonte: 'sispont' | 'portal' | 'rh' | null
   cargo_portal: string
   lotacao_portal: string
   admissao: string
   unidade: string | null
   extensionista: boolean
+  // Da relação do RH (quando publicada): vínculo, órgão de cessão e se a
+  // pessoa está no quadro do IDR (false = só no SisPont, ex.: cedido de prefeitura).
+  vinculo?: string
+  cedido_para?: string
+  rh?: boolean
 }
 
 export function buildServidores(sispont: Record<string, string>[], portal: Map<string, PortalRow[]>): Servidor[] {
@@ -200,6 +205,111 @@ export function buildServidores(sispont: Record<string, string>[], portal: Map<s
       admissao: p?.admissao ?? '',
       unidade: unidadeDe(r.SETOR, r.COORDENACAO),
       extensionista: isExtensionista(diretoria, formacao),
+    })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Relação mensal do RH (servidores-rh.json, gerado no datageo-command por
+// scripts/build_servidores_rh.py e publicado no mesmo bucket). É a fonte de
+// verdade sobre quem está no quadro, município, vínculo e cessão; o SisPont
+// segue dando setor, diretoria, unidade e especialidade.
+
+export interface RhServidor {
+  id: string; nome: string; municipio: string; lotacao: string; ocupacao: string
+  vinculo: string; cedido_para: string; area: string; admissao: string
+}
+export interface Rh { referencia: string; fonte: string; ativos: RhServidor[]; desligados: string[] }
+
+// Sigla da coluna ÁREA do RH -> diretoria na grafia do SisPont.
+const AREA_DIRETORIA: Record<string, string> = {
+  DER: 'Diretoria de Extensao Rural',
+  DPI: 'Diretoria de Pesquisa e Inovacao',
+  DGI: 'Diretoria de Gestao Institucional',
+  DGN: 'Diretoria de Gestao de Negocios',
+  DII: 'Diretoria de Integracao Institucional',
+}
+
+/** Valida o JSON do RH; formato inesperado -> null (a função segue sem ele). */
+export function validaRh(x: unknown): Rh | null {
+  const r = x as Rh
+  return r && Array.isArray(r.ativos) && Array.isArray(r.desligados) && r.ativos.every((a) => a?.id && a?.nome)
+    ? r
+    : null
+}
+
+/**
+ * Sobrepõe o RH ao SisPont. Casa por matrícula; o que sobra casa por nome
+ * único (CC, PSS e aprendizes têm ID diferente no SisPont). Desligados no RH
+ * saem; quem só está no SisPont fica com `rh: false`; ativos do RH ausentes
+ * do SisPont entram com a lotação do RH. Cedido a outro órgão não conta como
+ * extensionista.
+ */
+export function aplicaRh(servidores: Servidor[], rh: Rh | null): Servidor[] {
+  if (!rh) return servidores
+  const porId = new Map(rh.ativos.map((r) => [r.id, r]))
+  const casado = new Map<Servidor, RhServidor>()
+  for (const s of servidores) {
+    const r = porId.get(s.id)
+    if (r) casado.set(s, r)
+  }
+  const usados = new Set([...casado.values()].map((r) => r.id))
+  const porNome = new Map<string, RhServidor[]>()
+  for (const r of rh.ativos) {
+    if (usados.has(r.id)) continue
+    porNome.set(norm(r.nome), [...(porNome.get(norm(r.nome)) ?? []), r])
+  }
+  for (const s of servidores) {
+    const hits = casado.has(s) ? [] : porNome.get(norm(s.nome)) ?? []
+    if (hits.length === 1 && !usados.has(hits[0].id)) {
+      casado.set(s, hits[0])
+      usados.add(hits[0].id)
+    }
+  }
+
+  const desligados = new Set(rh.desligados)
+  const out: Servidor[] = []
+  for (const s of servidores) {
+    const r = casado.get(s)
+    if (!r) {
+      if (!desligados.has(s.id)) out.push({ ...s, vinculo: '', cedido_para: '', rh: false })
+      continue
+    }
+    const formacao = s.formacao || formacaoDoCargo(r.ocupacao)
+    out.push({
+      ...s,
+      id: r.id,
+      municipio: r.municipio || s.municipio,
+      admissao: r.admissao || s.admissao,
+      formacao,
+      formacao_fonte: s.formacao ? s.formacao_fonte : formacao ? 'rh' : null,
+      vinculo: r.vinculo,
+      cedido_para: r.cedido_para,
+      rh: true,
+      extensionista: !r.cedido_para && isExtensionista(s.diretoria, formacao),
+    })
+  }
+  for (const r of rh.ativos) {
+    if (usados.has(r.id)) continue
+    const diretoria = AREA_DIRETORIA[norm(r.area)] ?? ''
+    const formacao = formacaoDoCargo(r.ocupacao)
+    out.push({
+      id: r.id,
+      nome: r.nome,
+      municipio: r.municipio,
+      setor: r.lotacao,
+      diretoria,
+      formacao,
+      formacao_fonte: formacao ? 'rh' : null,
+      cargo_portal: '',
+      lotacao_portal: '',
+      admissao: r.admissao,
+      unidade: unidadeDe(r.lotacao, ''),
+      extensionista: !r.cedido_para && isExtensionista(diretoria, formacao),
+      vinculo: r.vinculo,
+      cedido_para: r.cedido_para,
+      rh: true,
     })
   }
   return out
