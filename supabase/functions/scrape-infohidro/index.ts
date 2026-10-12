@@ -42,17 +42,23 @@ const toFloat = (v: unknown): number | null => {
 
 async function requestWithRetry(
   url: string,
-  opts: { method?: string; maxRetries?: number; timeoutMs?: number; body?: unknown } = {},
+  opts: {
+    method?: string
+    maxRetries?: number
+    timeoutMs?: number
+    body?: unknown
+    headers?: Record<string, string>
+  } = {},
 ): Promise<Response | null> {
-  const { method = 'GET', maxRetries = 3, timeoutMs = 30_000, body } = opts
+  const { method = 'GET', maxRetries = 3, timeoutMs = 30_000, body, headers = {} } = opts
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const resp = await fetch(url, {
         method,
         headers:
           body === undefined
-            ? BROWSER_HEADERS
-            : { ...BROWSER_HEADERS, 'Content-Type': 'application/json' },
+            ? { ...BROWSER_HEADERS, ...headers }
+            : { ...BROWSER_HEADERS, ...headers, 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       })
@@ -162,8 +168,8 @@ async function scrapeReservatorios(): Promise<Record<string, unknown>[]> {
 
 // --- 2. Estacoes ----------------------------------------------------------
 
-async function fetchEstacoes(): Promise<Record<string, unknown>[]> {
-  const resp = await requestWithRetry(`${INFOHIDRO_BASE}/telemetry/v1/station`)
+async function fetchEstacoes(headers: Record<string, string> = {}): Promise<Record<string, unknown>[]> {
+  const resp = await requestWithRetry(`${INFOHIDRO_BASE}/telemetry/v1/station`, { headers })
   if (resp === null || resp.status !== 200) {
     console.warn(`estacoes: ${resp === null ? 'sem resposta' : `HTTP ${resp.status}`}`)
     return []
@@ -207,8 +213,11 @@ const OPERACAO_KEY: Record<number, string> = {
 
 const isPR = (s: Record<string, unknown>) => String(s['municipio_id'] ?? '').startsWith('41')
 
-async function getJsonArray(url: string): Promise<Record<string, unknown>[]> {
-  const resp = await requestWithRetry(url, { maxRetries: 2, timeoutMs: 60_000 })
+async function getJsonArray(
+  url: string,
+  headers: Record<string, string> = {},
+): Promise<Record<string, unknown>[]> {
+  const resp = await requestWithRetry(url, { maxRetries: 2, timeoutMs: 60_000, headers })
   if (resp === null || resp.status !== 200) {
     console.warn(`${url.split('?')[0]}: ${resp === null ? 'sem resposta' : `HTTP ${resp.status}`}`)
     return []
@@ -236,7 +245,10 @@ function groupSummary(rows: Record<string, unknown>[], keep: Set<string>) {
   return out
 }
 
-async function enrichStationsPR(stations: Record<string, unknown>[]): Promise<number> {
+async function enrichStationsPR(
+  stations: Record<string, unknown>[],
+  headers: Record<string, string> = {},
+): Promise<number> {
   const B = `${INFOHIDRO_BASE}/telemetry/v1`
   const pr = new Set(stations.filter(isPR).map((s) => String(s['codigo'])))
   const now = new Date()
@@ -247,10 +259,10 @@ async function enrichStationsPR(stations: Record<string, unknown>[]): Promise<nu
   const mesAnt = new Date(Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
 
   const [sensorStation, readings, daily, monthly] = await Promise.all([
-    getJsonArray(`${B}/sensorstation`),
-    getJsonArray(`${B}/readingsdata?datetime_start=${iso(new Date(now.getTime() - 3 * 3_600_000))}&datetime_end=${iso(now)}`),
-    getJsonArray(`${B}/dailysummary?date_start=${ontem}&date_end=${ontem}`),
-    getJsonArray(`${B}/monthlysummary?date_start=${mesAnt}&date_end=${mesAnt}`),
+    getJsonArray(`${B}/sensorstation`, headers),
+    getJsonArray(`${B}/readingsdata?datetime_start=${iso(new Date(now.getTime() - 3 * 3_600_000))}&datetime_end=${iso(now)}`, headers),
+    getJsonArray(`${B}/dailysummary?date_start=${ontem}&date_end=${ontem}`, headers),
+    getJsonArray(`${B}/monthlysummary?date_start=${mesAnt}&date_end=${mesAnt}`, headers),
   ])
 
   const sensores: Record<string, number[]> = {}
@@ -285,6 +297,64 @@ async function enrichStationsPR(stations: Record<string, unknown>[]): Promise<nu
     if (leituras[c]) enriched++
   }
   return enriched
+}
+
+// --- 2c. Estacoes Sanepar/IAT (restrito) -----------------------------------
+// Com o login da conta Sanepar (secrets INFOHIDRO_USER/INFOHIDRO_PASSWORD) a
+// API devolve OUTRO conjunto: 61 estacoes da Sanepar e do IAT no PR (nenhuma
+// na lista publica) e /hydrological com os parametros dos reservatorios
+// (cota de alerta, volumes...). Uso autorizado pelo dono do projeto em
+// 2026-10-12, so para usuario logado: vai para o bucket privado, nunca para
+// data_cache (que tem leitura anonima).
+
+const BUCKET_PRIVADO = 'datageo-privado'
+const ARQUIVO_SANEPAR = 'infohidro-sanepar.json'
+
+async function infohidroLogin(user: string, password: string): Promise<string> {
+  // client_id/secret sao os fixos do front do InfoHidro (app.js), nao segredos
+  const resp = await requestWithRetry(
+    `${INFOHIDRO_BASE}/authentication/v1/oauth2/accessToken?grant_type=password`,
+    {
+      method: 'POST',
+      maxRetries: 2,
+      body: { client_id: 'clientOIDC', client_secret: 'secretOIDC', username: user, password },
+    },
+  )
+  if (resp === null || resp.status !== 200) {
+    throw new Error(`login InfoHidro: ${resp === null ? 'sem resposta' : `HTTP ${resp.status}`}`)
+  }
+  const token = (await resp.json())?.access_token
+  if (!token) throw new Error('login InfoHidro: resposta sem access_token')
+  return String(token)
+}
+
+async function scrapeSaneparPrivado(client: SupabaseClient): Promise<string> {
+  const user = Deno.env.get('INFOHIDRO_USER')
+  const password = Deno.env.get('INFOHIDRO_PASSWORD')
+  if (!user || !password) return 'PULADO (sem INFOHIDRO_USER/INFOHIDRO_PASSWORD)'
+
+  const headers = { Authorization: `Bearer ${await infohidroLogin(user, password)}` }
+  const estacoes = await fetchEstacoes(headers)
+  if (estacoes.length === 0) return 'SEM DADOS'
+  const comLeitura = await enrichStationsPR(estacoes, headers)
+
+  const parametros = new Map(
+    (await getJsonArray(`${INFOHIDRO_BASE}/telemetry/v1/hydrological`, headers))
+      .map((h) => [String(h['estacaoId']), h['parametros']]),
+  )
+  for (const s of estacoes) {
+    const p = parametros.get(String(s['codigo']))
+    if (p) s['parametros'] = p
+  }
+
+  const payload = { gerado_em: new Date().toISOString(), fonte: 'InfoHidro (SIMEPAR), acesso Sanepar', items: estacoes }
+  const { error } = await client.storage.from(BUCKET_PRIVADO).upload(
+    ARQUIVO_SANEPAR,
+    new Blob([JSON.stringify(payload)], { type: 'application/json' }),
+    { upsert: true, contentType: 'application/json', cacheControl: '300' },
+  )
+  if (error) throw new Error(`upload ${ARQUIVO_SANEPAR}: ${error.message}`)
+  return `OK (${estacoes.length} estacoes, ${comLeitura} com leitura, ${parametros.size} reservatorios)`
 }
 
 // --- 4. Hotspots ----------------------------------------------------------
@@ -569,6 +639,8 @@ Deno.serve((req: Request) =>
         return `OK (${estacoes.length}, sem telemetria: ${(e as Error).message})`
       }
     })
+
+    await step('sanepar_privado', () => scrapeSaneparPrivado(client))
 
     results['mananciais'] =
       locationIds.length > 0 ? `OK (CACHE ${locationIds.length} IDs)` : 'SEM CACHE'
