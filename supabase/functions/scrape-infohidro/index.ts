@@ -184,10 +184,107 @@ async function fetchEstacoes(): Promise<Record<string, unknown>[]> {
       municipio_id: s['municipioId'] ?? null,
       latitude: lat,
       longitude: lon,
+      altitude: toFloat(s['altitude']),
       inicio_operacao: s['iniciooperacao'] ?? null,
+      data_instalacao: s['datainstalacao'] ?? null,
     })
   }
   return stations
+}
+
+// --- 2b. Telemetria por estacao (so PR) ------------------------------------
+// Anexa a cada estacao do PR: sensores instalados, ultima leitura por sensor
+// (janela de 3 h), resumo de ontem e do mes anterior. O filtro station_ids
+// da API devolve [] (verificado 2026-10-12), entao busca tudo e filtra aqui.
+// ponytail: leituras ficam tao velhas quanto o cron de 6 h; se precisar de
+// tempo real, Edge Function propria com cron horario e health separado.
+
+// operacaoId -> chave compacta (1-8 e 19 da /telemetry/v1/operation; o resto
+// sao contagens de direcao e radiacao em MJ, fora do tooltip)
+const OPERACAO_KEY: Record<number, string> = {
+  1: 'avg', 2: 'max', 3: 'min', 4: 'sum', 5: 'pred', 6: 'avg', 7: 'max', 8: 'min', 19: 'sum07',
+}
+
+const isPR = (s: Record<string, unknown>) => String(s['municipio_id'] ?? '').startsWith('41')
+
+async function getJsonArray(url: string): Promise<Record<string, unknown>[]> {
+  const resp = await requestWithRetry(url, { maxRetries: 2, timeoutMs: 60_000 })
+  if (resp === null || resp.status !== 200) {
+    console.warn(`${url.split('?')[0]}: ${resp === null ? 'sem resposta' : `HTTP ${resp.status}`}`)
+    return []
+  }
+  const data = await resp.json()
+  return Array.isArray(data) ? data : []
+}
+
+/** Agrupa resumos (diario/mensal) em {estacao: {sensor: {avg,max,...}}}. */
+function groupSummary(rows: Record<string, unknown>[], keep: Set<string>) {
+  const out: Record<string, Record<string, Record<string, unknown>>> = {}
+  for (const r of rows) {
+    const est = String(r['estacaoId'])
+    const key = OPERACAO_KEY[Number(r['operacaoId'])]
+    if (!keep.has(est) || !key) continue
+    const sensor = ((out[est] ??= {})[String(r['sensorId'])] ??= {})
+    if (sensor[key] !== undefined) continue
+    sensor[key] = toFloat(r['valor'])
+    // hora do extremo (diario, ja em Brasilia: pico de 15:00 UTC no
+    // readingsdata vem como hora 12, conferido 2026-10-12) ou dia/hora
+    // (mensal, ISO em UTC)
+    if (r['hora'] !== undefined) sensor[`${key}_hora`] = `${String(r['hora']).padStart(2, '0')}:${String(r['minuto'] ?? 0).padStart(2, '0')}`
+    if (r['diahora']) sensor[`${key}_em`] = r['diahora']
+  }
+  return out
+}
+
+async function enrichStationsPR(stations: Record<string, unknown>[]): Promise<number> {
+  const B = `${INFOHIDRO_BASE}/telemetry/v1`
+  const pr = new Set(stations.filter(isPR).map((s) => String(s['codigo'])))
+  const now = new Date()
+  const iso = (d: Date) => d.toISOString().slice(0, 19) + 'Z'
+  // datas no fuso de Brasilia (UTC-3, sem horario de verao)
+  const brt = new Date(now.getTime() - 3 * 3_600_000)
+  const ontem = new Date(brt.getTime() - 86_400_000).toISOString().slice(0, 10)
+  const mesAnt = new Date(Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth() - 1, 1)).toISOString().slice(0, 7)
+
+  const [sensorStation, readings, daily, monthly] = await Promise.all([
+    getJsonArray(`${B}/sensorstation`),
+    getJsonArray(`${B}/readingsdata?datetime_start=${iso(new Date(now.getTime() - 3 * 3_600_000))}&datetime_end=${iso(now)}`),
+    getJsonArray(`${B}/dailysummary?date_start=${ontem}&date_end=${ontem}`),
+    getJsonArray(`${B}/monthlysummary?date_start=${mesAnt}&date_end=${mesAnt}`),
+  ])
+
+  const sensores: Record<string, number[]> = {}
+  for (const r of sensorStation) {
+    const est = String(r['estacaoId'])
+    if (pr.has(est)) (sensores[est] ??= []).push(Number(r['sensorId']))
+  }
+
+  // ultima leitura por (estacao, sensor): [valor, datahora UTC, qualidadeId]
+  const leituras: Record<string, Record<string, [number | null, string, number]>> = {}
+  for (const r of readings) {
+    const est = String(r['estacaoId'])
+    if (!pr.has(est)) continue
+    const porSensor = (leituras[est] ??= {})
+    const sid = String(r['sensorId'])
+    const dh = String(r['datahora'])
+    if (!porSensor[sid] || porSensor[sid][1] < dh) {
+      porSensor[sid] = [toFloat(r['leitura']), dh, Number(r['qualidadeId'])]
+    }
+  }
+
+  const dia = groupSummary(daily, pr)
+  const mes = groupSummary(monthly, pr)
+  let enriched = 0
+  for (const s of stations) {
+    const c = String(s['codigo'])
+    if (!pr.has(c)) continue
+    s['sensores'] = sensores[c] ?? []
+    s['leituras'] = leituras[c] ?? {}
+    s['resumo_dia'] = dia[c] ? { data: ontem, sensores: dia[c] } : null
+    s['resumo_mes'] = mes[c] ? { mes: mesAnt, sensores: mes[c] } : null
+    if (leituras[c]) enriched++
+  }
+  return enriched
 }
 
 // --- 4. Hotspots ----------------------------------------------------------
@@ -461,8 +558,16 @@ Deno.serve((req: Request) =>
     await step('estacoes', async () => {
       const estacoes = await fetchEstacoes()
       if (estacoes.length === 0) return 'SEM DADOS'
+      // cadastro primeiro: se a telemetria travar ou falhar, ele ja esta gravado
       await upsertCacheWithWrap(client, 'infohidro_estacoes_pr', estacoes, 'infohidro_telemetry')
-      return `OK (${estacoes.length})`
+      try {
+        const comLeitura = await enrichStationsPR(estacoes)
+        await upsertCacheWithWrap(client, 'infohidro_estacoes_pr', estacoes, 'infohidro_telemetry')
+        return `OK (${estacoes.length}, ${comLeitura} PR com leitura)`
+      } catch (e) {
+        console.warn(`telemetria PR: ${(e as Error).message}`)
+        return `OK (${estacoes.length}, sem telemetria: ${(e as Error).message})`
+      }
     })
 
     results['mananciais'] =
