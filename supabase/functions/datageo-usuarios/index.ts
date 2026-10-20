@@ -11,6 +11,8 @@
 //   { acao: 'revogar', matricula }        -> tira app_metadata.datageo (matricula ou e-mail);
 //                                            o JWT ja emitido vale ate expirar (<= 1 h)
 //   { acao: 'reativar', matricula }       -> religa app_metadata.datageo (senha intacta)
+//   { acao: 'externo', matricula, externo } -> marca/desmarca app_metadata.datageo_externo
+//                                            (externo nao le o bucket datageo-privado, migration 051)
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient, type User } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
@@ -55,12 +57,12 @@ serve(async (req) => {
   if (!quem) return resp(401, { error: 'Sessão inválida' })
   if (quem.app_metadata?.datageo_admin !== true) return resp(403, { error: 'Sem permissão de administrador' })
 
-  let body: { acao?: string; matricula?: string; nome?: string }
+  let body: { acao?: string; matricula?: string; nome?: string; externo?: boolean }
   try { body = await req.json() } catch { return resp(400, { error: 'JSON inválido' }) }
   const matricula = String(body.matricula ?? '').trim()
 
   try {
-    if (body.acao === 'revogar' || body.acao === 'reativar') {
+    if (body.acao === 'revogar' || body.acao === 'reativar' || body.acao === 'externo') {
       // Usuarios do c2 entram por e-mail; os do SISATER, pela matricula.
       const email = matricula.includes('@') ? matricula.toLowerCase() : emailDe(matricula)
       const valido = matricula.includes('@') ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) : /^\d{3,10}$/.test(matricula)
@@ -69,6 +71,17 @@ serve(async (req) => {
       }
       const alvo = await acharPorEmail(admin, email)
       if (!alvo) return resp(404, { error: 'Usuário não encontrado' })
+      if (body.acao === 'externo') {
+        if (typeof body.externo !== 'boolean') return resp(400, { error: 'Informe externo: true ou false' })
+        if (alvo.id === quem.id) return resp(400, { error: 'Você não pode mudar o próprio perfil' })
+        if (alvo.app_metadata?.datageo_admin === true) return resp(403, { error: 'Administrador não pode ser externo' })
+        const { error } = await admin.auth.admin.updateUserById(alvo.id, {
+          app_metadata: { ...alvo.app_metadata, datageo_externo: body.externo },
+        })
+        if (error) throw error
+        console.log(`[datageo-usuarios] ${quem.id} marcou ${email} externo=${body.externo}`)
+        return resp(200, { ok: true, nome: alvo.user_metadata?.nome ?? null })
+      }
       if (body.acao === 'reativar') {
         if (alvo.app_metadata?.datageo === true) return resp(409, { error: 'Usuário já tem acesso' })
         const { revogado_por: _p, revogado_em: _e, ...resto } = alvo.app_metadata ?? {}
