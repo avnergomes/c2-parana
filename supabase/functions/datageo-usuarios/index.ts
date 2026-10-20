@@ -10,6 +10,7 @@
 //   { acao: 'resetar', matricula }        -> volta a senha para a inicial (e religa o acesso)
 //   { acao: 'revogar', matricula }        -> tira app_metadata.datageo (matricula ou e-mail);
 //                                            o JWT ja emitido vale ate expirar (<= 1 h)
+//   { acao: 'reativar', matricula }       -> religa app_metadata.datageo (senha intacta)
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient, type User } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
@@ -59,7 +60,7 @@ serve(async (req) => {
   const matricula = String(body.matricula ?? '').trim()
 
   try {
-    if (body.acao === 'revogar') {
+    if (body.acao === 'revogar' || body.acao === 'reativar') {
       // Usuarios do c2 entram por e-mail; os do SISATER, pela matricula.
       const email = matricula.includes('@') ? matricula.toLowerCase() : emailDe(matricula)
       const valido = matricula.includes('@') ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) : /^\d{3,10}$/.test(matricula)
@@ -68,6 +69,16 @@ serve(async (req) => {
       }
       const alvo = await acharPorEmail(admin, email)
       if (!alvo) return resp(404, { error: 'Usuário não encontrado' })
+      if (body.acao === 'reativar') {
+        if (alvo.app_metadata?.datageo === true) return resp(409, { error: 'Usuário já tem acesso' })
+        const { revogado_por: _p, revogado_em: _e, ...resto } = alvo.app_metadata ?? {}
+        const { error } = await admin.auth.admin.updateUserById(alvo.id, {
+          app_metadata: { ...resto, datageo: true, reativado_por: quem.id, reativado_em: new Date().toISOString() },
+        })
+        if (error) throw error
+        console.log(`[datageo-usuarios] ${quem.id} reativou ${email}`)
+        return resp(200, { ok: true, nome: alvo.user_metadata?.nome ?? null })
+      }
       if (alvo.id === quem.id) return resp(400, { error: 'Você não pode revogar o próprio acesso' })
       if (alvo.app_metadata?.datageo_admin === true) return resp(403, { error: 'Usuário é administrador; revogue pela service key' })
       if (alvo.app_metadata?.datageo !== true) return resp(409, { error: 'Usuário já está sem acesso' })
