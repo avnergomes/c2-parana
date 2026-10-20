@@ -13,6 +13,10 @@
 //   { acao: 'reativar', matricula }       -> religa app_metadata.datageo (senha intacta)
 //   { acao: 'externo', matricula, externo } -> marca/desmarca app_metadata.datageo_externo
 //                                            (externo nao le o bucket datageo-privado, migration 051)
+//   { acao: 'solicitacoes', status? }     -> pedidos de usuarios externos (botao "Solicitar acesso", migration 052)
+//   { acao: 'aprovar', id }               -> cria a conta externa (ou religa a existente) e marca aprovada;
+//                                            conta nova recebe senha temporaria (devolvida 1 vez)
+//   { acao: 'recusar', id }               -> marca recusada (apagada 90 dias depois)
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient, type User } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
@@ -32,9 +36,13 @@ function cors(req: Request): Record<string, string> {
 }
 
 const inverter = (s: string) => [...s].reverse().join('')
+// Sem 0/O/1/l/I: a senha temporaria e ditada ou copiada a mao.
+const ALFABETO = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const senhaTemporaria = () =>
+  [...crypto.getRandomValues(new Uint32Array(12))].map((n) => ALFABETO[n % ALFABETO.length]).join('')
 const emailDe = (matricula: string) => `${matricula}@${EMAIL_DOMINIO}`
 
-async function acharPorEmail(admin: ReturnType<typeof createClient<any, "public", any>>, email: string): Promise<User | null> {
+async function acharPorEmail(admin: ReturnType<typeof createClient<any, 'public', any>>, email: string): Promise<User | null> {
   // ponytail: varre a lista (~1,2 mil usuarios, 2 paginas); trocar por RPC se passar de 10 mil.
   for (let page = 1; ; page++) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 })
@@ -43,6 +51,57 @@ async function acharPorEmail(admin: ReturnType<typeof createClient<any, "public"
     if (achado) return achado
     if (data.users.length < 1000) return null
   }
+}
+
+type Resp = (status: number, body: unknown) => Response
+type Admin = ReturnType<typeof createClient<any, 'public', any>>
+
+/** Aprova (cria ou religa a conta) ou recusa uma solicitacao pendente. */
+async function decidir(admin: Admin, quemId: string, acao: string, id: number, resp: Resp): Promise<Response> {
+  if (!Number.isInteger(id) || id <= 0) return resp(400, { error: 'Solicitação inválida' })
+  const { data: sol, error } = await admin.from('datageo_solicitacao').select('*').eq('id', id).maybeSingle()
+  if (error) throw error
+  if (!sol) return resp(404, { error: 'Solicitação não encontrada' })
+  if (sol.status !== 'pendente') return resp(409, { error: `Solicitação já ${sol.status}` })
+  const decisao = { decidido_em: new Date().toISOString(), decidido_por: quemId }
+
+  if (acao === 'recusar') {
+    const { error: e } = await admin.from('datageo_solicitacao').update({ ...decisao, status: 'recusada' }).eq('id', id)
+    if (e) throw e
+    console.log(`[datageo-usuarios] ${quemId} recusou solicitacao ${id}`)
+    return resp(200, { ok: true })
+  }
+
+  // Solicitacao e so de externo: servidor do IDR entra pela matricula.
+  const email = String(sol.email).toLowerCase()
+  const existente = await acharPorEmail(admin, email)
+  let senha: string | null = null
+  let userId: string
+  if (existente) {
+    // Conta ja existe (usuario do c2, servidor importado, revogado): so religa o acesso.
+    if (existente.app_metadata?.datageo_admin === true) return resp(409, { error: 'Conta já é de administrador' })
+    const { error: e } = await admin.auth.admin.updateUserById(existente.id, {
+      app_metadata: { ...existente.app_metadata, datageo: true, datageo_externo: true, solicitacao_id: id },
+    })
+    if (e) throw e
+    userId = existente.id
+  } else {
+    senha = senhaTemporaria()
+    const { data: novo, error: e } = await admin.auth.admin.createUser({
+      email,
+      password: senha,
+      email_confirm: true,
+      app_metadata: { datageo: true, datageo_externo: true, origem: 'solicitacao', solicitacao_id: id, cadastrado_por: quemId },
+      user_metadata: { nome: sol.nome, entidade: sol.entidade, must_change_password: true },
+    })
+    if (e) throw e
+    userId = novo.user.id
+  }
+  const { error: e2 } = await admin.from('datageo_solicitacao')
+    .update({ ...decisao, status: 'aprovada', user_id: userId }).eq('id', id)
+  if (e2) throw e2
+  console.log(`[datageo-usuarios] ${quemId} aprovou solicitacao ${id} (${existente ? 'conta existente' : 'conta nova'})`)
+  return resp(200, { ok: true, login: email, conta_existente: Boolean(existente), senha_temporaria: senha })
 }
 
 serve(async (req) => {
@@ -57,8 +116,25 @@ serve(async (req) => {
   if (!quem) return resp(401, { error: 'Sessão inválida' })
   if (quem.app_metadata?.datageo_admin !== true) return resp(403, { error: 'Sem permissão de administrador' })
 
-  let body: { acao?: string; matricula?: string; nome?: string; externo?: boolean }
+  let body: { acao?: string; matricula?: string; nome?: string; externo?: boolean; id?: number; status?: string }
   try { body = await req.json() } catch { return resp(400, { error: 'JSON inválido' }) }
+
+  if (body.acao === 'solicitacoes') {
+    const status = ['pendente', 'aprovada', 'recusada'].includes(String(body.status)) ? String(body.status) : 'pendente'
+    const { data, error } = await admin.from('datageo_solicitacao').select('*')
+      .eq('status', status).order('criado_em', { ascending: false }).limit(500)
+    if (error) { console.error('[datageo-usuarios]', error); return resp(500, { error: 'Erro interno' }) }
+    return resp(200, { ok: true, solicitacoes: data })
+  }
+
+  if (body.acao === 'aprovar' || body.acao === 'recusar') {
+    try {
+      return await decidir(admin, quem.id, body.acao, Number(body.id), resp)
+    } catch (e) {
+      console.error('[datageo-usuarios]', e)
+      return resp(500, { error: 'Erro interno' })
+    }
+  }
   const matricula = String(body.matricula ?? '').trim()
 
   try {
