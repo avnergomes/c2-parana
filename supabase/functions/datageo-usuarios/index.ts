@@ -7,7 +7,9 @@
 //   troca obrigatoria no primeiro acesso.
 // Acoes (POST JSON):
 //   { acao: 'criar',   matricula, nome }  -> 201 | 409 se ja existe
-//   { acao: 'resetar', matricula }        -> volta a senha para a inicial
+//   { acao: 'resetar', matricula }        -> volta a senha para a inicial (e religa o acesso)
+//   { acao: 'revogar', matricula }        -> tira app_metadata.datageo (matricula ou e-mail);
+//                                            o JWT ja emitido vale ate expirar (<= 1 h)
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts'
 import { createClient, type User } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 
@@ -29,7 +31,7 @@ function cors(req: Request): Record<string, string> {
 const inverter = (s: string) => [...s].reverse().join('')
 const emailDe = (matricula: string) => `${matricula}@${EMAIL_DOMINIO}`
 
-async function acharPorEmail(admin: ReturnType<typeof createClient>, email: string): Promise<User | null> {
+async function acharPorEmail(admin: ReturnType<typeof createClient<any, "public", any>>, email: string): Promise<User | null> {
   // ponytail: varre a lista (~1,2 mil usuarios, 2 paginas); trocar por RPC se passar de 10 mil.
   for (let page = 1; ; page++) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 })
@@ -55,9 +57,30 @@ serve(async (req) => {
   let body: { acao?: string; matricula?: string; nome?: string }
   try { body = await req.json() } catch { return resp(400, { error: 'JSON inválido' }) }
   const matricula = String(body.matricula ?? '').trim()
-  if (!/^\d{3,10}$/.test(matricula)) return resp(400, { error: 'Matrícula deve ter de 3 a 10 dígitos' })
 
   try {
+    if (body.acao === 'revogar') {
+      // Usuarios do c2 entram por e-mail; os do SISATER, pela matricula.
+      const email = matricula.includes('@') ? matricula.toLowerCase() : emailDe(matricula)
+      const valido = matricula.includes('@') ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) : /^\d{3,10}$/.test(matricula)
+      if (!valido) {
+        return resp(400, { error: 'Informe a matrícula ou o e-mail' })
+      }
+      const alvo = await acharPorEmail(admin, email)
+      if (!alvo) return resp(404, { error: 'Usuário não encontrado' })
+      if (alvo.id === quem.id) return resp(400, { error: 'Você não pode revogar o próprio acesso' })
+      if (alvo.app_metadata?.datageo_admin === true) return resp(403, { error: 'Usuário é administrador; revogue pela service key' })
+      if (alvo.app_metadata?.datageo !== true) return resp(409, { error: 'Usuário já está sem acesso' })
+      const { error } = await admin.auth.admin.updateUserById(alvo.id, {
+        app_metadata: { ...alvo.app_metadata, datageo: false, revogado_por: quem.id, revogado_em: new Date().toISOString() },
+      })
+      if (error) throw error
+      console.log(`[datageo-usuarios] ${quem.id} revogou ${email}`)
+      return resp(200, { ok: true, nome: alvo.user_metadata?.nome ?? null })
+    }
+
+    if (!/^\d{3,10}$/.test(matricula)) return resp(400, { error: 'Matrícula deve ter de 3 a 10 dígitos' })
+
     if (body.acao === 'criar') {
       const nome = String(body.nome ?? '').trim().replace(/\s+/g, ' ')
       if (nome.length < 3 || nome.length > 120) return resp(400, { error: 'Informe o nome completo' })
