@@ -6,9 +6,10 @@
 //
 // Diferencas deliberadas em relacao ao Python, todas justificadas:
 //
-//  1. Fetch unico. O Python consultava profiles + notification_preferences a
-//     cada regra disparada e notifications a cada regra atendida (N queries
-//     por run). Aqui tudo isso e carregado uma vez e avaliado em memoria.
+//  1. Fetch unico. O Python consultava notifications a cada regra atendida
+//     (N queries por run). Aqui o cooldown e carregado uma vez e avaliado em
+//     memoria. Sem fan-out por usuario: um registro por disparo (ver
+//     createNotifications).
 //     Com dezenas de regras a diferenca e de segundos, o que importa dentro do
 //     wall-clock da Edge Function.
 //
@@ -24,8 +25,6 @@
 //     como "ja existe" funciona corretamente com o indice parcial.
 
 import { pooledMap, runEtl, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
-
-const SEVERITY_ORDER: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 }
 
 const DOMAIN_TO_INCIDENT_TYPE: Record<string, string> = {
   clima: 'onda_calor',
@@ -54,14 +53,6 @@ interface AlertRule {
   channels: string[] | null
   cooldown_minutes: number | null
   auto_create_incident: boolean | null
-}
-
-interface UserPrefs {
-  user_id: string
-  min_severity: string | null
-  push_enabled: boolean | null
-  email_enabled: boolean | null
-  telegram_enabled: boolean | null
 }
 
 // ---------------------------------------------------------------------------
@@ -312,67 +303,42 @@ async function sendTelegram(title: string, body: string, severity: string): Prom
 // Notificacoes e incidentes
 // ---------------------------------------------------------------------------
 
-function channelEnabled(channel: string, prefs: UserPrefs | undefined): boolean {
-  if (!prefs) return channel !== 'telegram' // defaults: push/email on, telegram off
-  if (channel === 'push') return prefs.push_enabled ?? true
-  if (channel === 'email') return prefs.email_enabled ?? true
-  if (channel === 'telegram') return prefs.telegram_enabled ?? false
-  return true
-}
-
+// Um registro por disparo, sem destinatario (user_id null), como o etl-cemaden.
+// O fan-out por usuario de profiles foi removido em 2026-10-21: o Auth passou a
+// ter ~1.100 usuarios do DataGeo e cada disparo gravava 1.000 linhas, esgotando
+// o Disk IO do projeto. O registro continua servindo de cooldown e de contagem
+// para o etl-situational.
 async function createNotifications(
   client: SupabaseClient,
   rule: AlertRule,
   condition: Condition,
   matching: DataRecord[],
-  userIds: string[],
-  prefsByUser: Map<string, UserPrefs>,
 ): Promise<number> {
-  if (userIds.length === 0) return 0
-
   const body = buildBody(rule, condition, matching)
   const channels = rule.channels?.length ? rule.channels : ['push']
-  const severityRank = SEVERITY_ORDER[rule.severity] ?? 0
-  const triggeredAt = new Date().toISOString()
 
-  const rows: Record<string, unknown>[] = []
-  for (const userId of userIds) {
-    const prefs = prefsByUser.get(userId)
-    const minRank = SEVERITY_ORDER[prefs?.min_severity ?? 'medium'] ?? 1
-    if (severityRank < minRank) continue
-
-    for (const channel of channels) {
-      if (!channelEnabled(channel, prefs)) continue
-      rows.push({
-        rule_id: rule.id,
-        user_id: userId,
-        channel,
-        title: rule.name,
-        body,
-        severity: rule.severity,
-        metadata: {
-          domain: rule.domain,
-          condition,
-          matching_count: matching.length,
-          triggered_at: triggeredAt,
-        },
-        is_read: false,
-      })
-    }
-  }
-
-  if (rows.length === 0) return 0
-
-  let created = 0
-  for (let i = 0; i < rows.length; i += 100) {
-    const batch = rows.slice(i, i + 100)
-    const { error } = await client.from('notifications').insert(batch)
-    if (error) console.warn(`notifications (${rule.name}): ${error.message}`)
-    else created += batch.length
+  const { error } = await client.from('notifications').insert({
+    rule_id: rule.id,
+    user_id: null,
+    channel: channels[0],
+    title: rule.name,
+    body,
+    severity: rule.severity,
+    metadata: {
+      domain: rule.domain,
+      condition,
+      matching_count: matching.length,
+      triggered_at: new Date().toISOString(),
+    },
+    is_read: false,
+  })
+  if (error) {
+    console.warn(`notifications (${rule.name}): ${error.message}`)
+    return 0
   }
 
   if (channels.includes('telegram')) await sendTelegram(rule.name, body, rule.severity)
-  return created
+  return 1
 }
 
 async function maybeCreateIncident(
@@ -451,16 +417,6 @@ Deno.serve((req: Request) =>
       if (t > (lastSentByRule.get(n.rule_id) ?? 0)) lastSentByRule.set(n.rule_id, t)
     }
 
-    const { data: profileData } = await client.from('profiles').select('id')
-    const userIds = ((profileData ?? []) as { id: string }[]).map((p) => p.id)
-
-    const { data: prefData } = await client
-      .from('notification_preferences')
-      .select('user_id,min_severity,push_enabled,email_enabled,telegram_enabled')
-    const prefsByUser = new Map(
-      ((prefData ?? []) as UserPrefs[]).map((p) => [p.user_id, p]),
-    )
-
     // --- Dados por dominio, um fetch por dominio distinto -----------------
     const domains = [...new Set(rules.map((r) => r.domain))]
     const domainResults = await pooledMap(domains, 4, (d) => fetchDomainData(client, d))
@@ -505,8 +461,6 @@ Deno.serve((req: Request) =>
           rule,
           condition,
           matching,
-          userIds,
-          prefsByUser,
         )
         // Marca o disparo em memoria: duas regras nunca compartilham id, mas
         // isso protege caso a lista traga a mesma regra duas vezes.
