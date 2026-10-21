@@ -4,7 +4,8 @@
 // Porte Deno de scripts/etl_correlations.py (a especificacao). Avalia regras
 // compostas (alert_rules.domain='composto') cruzando climate_data, fire_spots,
 // river_levels, dengue_data, air_quality e irtc_scores por municipio. Regra
-// disparada => fan-out de notifications (uma por usuario em profiles) +
+// disparada => um registro em notifications por municipio (user_id null, sem
+// fan-out por usuario desde 2026-10-21; o registro serve de cooldown) +
 // auto-criacao de incidente quando a regra pede.
 //
 // Municipios: o Python lia public/data/municipios-pr.geojson; aqui a lista
@@ -59,14 +60,6 @@ async function loadCompositeRules(client: SupabaseClient): Promise<Rule[]> {
     .eq('is_active', true)
   if (error) throw new Error(`alert_rules: ${error.message}`)
   return (data ?? []) as Rule[]
-}
-
-async function loadUsers(client: SupabaseClient): Promise<string[]> {
-  const { data, error } = await client.from('profiles').select('id').limit(1000)
-  if (error) throw new Error(`profiles: ${error.message}`)
-  return ((data ?? []) as { id: string | null }[])
-    .map((u) => u.id)
-    .filter((id): id is string => Boolean(id))
 }
 
 async function fetchRecentClimate(
@@ -366,7 +359,6 @@ Deno.serve((req: Request) =>
     }
 
     const lookup = buildNameLookup()
-    const userIds = await loadUsers(client)
 
     const climateAgg = await fetchRecentClimate(client, 6)
     const fireCounts = await fetchRecentFireCounts(client, 24, lookup)
@@ -404,30 +396,28 @@ Deno.serve((req: Request) =>
           incidentsCreated++
         }
 
-        for (const uid of userIds) {
-          notifications.push({
-            rule_id: rule.id,
-            user_id: uid,
-            channel: 'push',
-            title: `${rule.name} — ${munName}`,
-            body: buildBody(munName, ctx),
-            severity: rule.severity,
-            metadata: {
-              domain: 'composto',
-              ibge_code: ibgeCode,
-              municipality: munName,
-              source: 'etl_correlations',
-              rule_name: rule.name,
-              context_snapshot: {
-                fire_count: ctx.fire_count,
-                river_level: ctx.river_level,
-                dengue_level: ctx.dengue_level,
-                irtc_score: ctx.irtc_score,
-                aqi: ctx.aqi ?? null,
-              },
+        notifications.push({
+          rule_id: rule.id,
+          user_id: null,
+          channel: 'push',
+          title: `${rule.name} — ${munName}`,
+          body: buildBody(munName, ctx),
+          severity: rule.severity,
+          metadata: {
+            domain: 'composto',
+            ibge_code: ibgeCode,
+            municipality: munName,
+            source: 'etl_correlations',
+            rule_name: rule.name,
+            context_snapshot: {
+              fire_count: ctx.fire_count,
+              river_level: ctx.river_level,
+              dengue_level: ctx.dengue_level,
+              irtc_score: ctx.irtc_score,
+              aqi: ctx.aqi ?? null,
             },
-          })
-        }
+          },
+        })
       }
     }
 
