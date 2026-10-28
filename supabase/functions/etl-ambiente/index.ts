@@ -8,18 +8,29 @@
 // - FIRMS: CSV VIIRS_SNPP_NRT, bbox PR, janela 5 dias (maximo da API).
 //   Insert um a um com dedup por 23505: o UNIQUE INDEX de fire_spots usa
 //   COALESCE(acq_time,'') em expressao e on_conflict nao referencia indice
-//   de expressao. Matching foco->municipio por centroide mais proximo
-//   (<= 80 km), via _shared/pr_centroids.ts (mesma matematica do Python).
+//   de expressao. Foco->municipio por ponto-no-poligono (_shared/pr_geo.ts,
+//   mesma regra de scripts/pr_geo.py), gravando municipality e ibge_code;
+//   foco fora do PR e descartado. Ate 2026-10 era o centroide mais proximo
+//   (<= 80 km) com o bbox comecando em -54: 11 municipios do extremo Oeste
+//   ficavam fora da busca e focos de SP/SC/MS entravam em municipios
+//   paranaenses. Linhas antigas sem ibge_code sao reclassificadas a cada
+//   execucao (backfillFireSpots) ate sairem da janela de 30 dias.
 // - AQICN: 12 cidades por slug + fallback geo:lat;lon; upsert por city com
 //   fallback delete+insert.
 // - ANA: 8 estacoes fluviometricas, XML parseado por extracao de blocos
 //   <DadosHidrometereologicos> (regex por tag, mesmo casamento por
-//   substring de tag do Python); cotas de alerta por estacao.
+//   substring de tag do Python); cotas de alerta por estacao. Estacao sem
+//   leitura valida NAO e gravada: a ultima leitura real fica com a sua data
+//   (o IRTC so usa leitura de ate 12 h). Antes a falha virava um registro
+//   'normal' com observed_at = agora.
 
 import { runEtl, sleep, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
-import { PR_CENTROIDS } from '../_shared/pr_centroids.ts'
+import { municipioDoPonto } from '../_shared/pr_geo.ts'
+import { dataHoraAnaIso } from './ana.ts'
 
-const PR_BBOX = '-54,-26.7,-48.0,-22.5'
+// oeste,sul,leste,norte. O PR vai de -54,62 a -48,02 de longitude e de
+// -26,72 a -22,52 de latitude; a folga cobre a fronteira inteira.
+const PR_BBOX = '-54.7,-26.8,-47.9,-22.4'
 
 const CIDADES_AR: { id: string; slug: string }[] = [
   { id: 'curitiba', slug: 'curitiba' },
@@ -75,29 +86,6 @@ const COTAS_ALERTA: Record<string, { attention: number; alert: number; emergency
 
 // --- Utilitarios ----------------------------------------------------------
 
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const rad = (d: number) => (d * Math.PI) / 180
-  const dlat = rad(lat2 - lat1)
-  const dlon = rad(lon2 - lon1)
-  const a =
-    Math.sin(dlat / 2) ** 2 +
-    Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dlon / 2) ** 2
-  return 2 * 6371 * Math.asin(Math.sqrt(a))
-}
-
-function findNearestMunicipality(lat: number, lon: number, maxKm = 80): string | null {
-  let nearest: string | null = null
-  let minDist = Infinity
-  for (const [name, clat, clon] of PR_CENTROIDS) {
-    const dist = haversineKm(lat, lon, clat, clon)
-    if (dist < minDist && dist <= maxKm) {
-      minDist = dist
-      nearest = name
-    }
-  }
-  return nearest
-}
-
 /** Request com retry exponencial; 5xx e erro de rede retentam, <500 retorna. */
 async function requestWithRetry(
   url: string,
@@ -131,6 +119,7 @@ interface FireSpot {
   latitude: number
   longitude: number
   municipality: string | null
+  ibge_code: string | null
   brightness: number | null
   scan: number | null
   track: number | null
@@ -156,31 +145,38 @@ function parseCsv(text: string): Record<string, string>[] {
   return rows
 }
 
-async function fetchFirms(firmsKey: string): Promise<FireSpot[]> {
+async function fetchFirms(firmsKey: string): Promise<{ spots: FireSpot[]; foraDoPr: number }> {
   const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${firmsKey}/VIIRS_SNPP_NRT/${PR_BBOX}/5`
   const resp = await requestWithRetry(url, { maxRetries: 3, timeoutMs: 60_000 })
   if (resp === null) {
     console.warn('FIRMS: falha de conexao apos retries')
-    return []
+    return { spots: [], foraDoPr: 0 }
   }
   if (resp.status === 403 || resp.status === 429) {
     console.warn(`FIRMS: HTTP ${resp.status} - limite de API atingido`)
-    return []
+    return { spots: [], foraDoPr: 0 }
   }
   if (!resp.ok) {
     console.warn(`FIRMS: HTTP ${resp.status}`)
-    return []
+    return { spots: [], foraDoPr: 0 }
   }
   const text = await resp.text()
   const spots: FireSpot[] = []
+  let foraDoPr = 0
   for (const row of parseCsv(text)) {
     const lat = Number(row['latitude'] ?? 0)
     const lon = Number(row['longitude'] ?? 0)
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue
+    const mun = municipioDoPonto(lat, lon)
+    if (mun === null) {
+      foraDoPr++
+      continue
+    }
     spots.push({
       latitude: lat,
       longitude: lon,
-      municipality: findNearestMunicipality(lat, lon),
+      municipality: mun.nome,
+      ibge_code: mun.ibge,
       brightness: row['bright_ti4'] ? Number(row['bright_ti4']) : null,
       scan: row['scan'] ? Number(row['scan']) : null,
       track: row['track'] ? Number(row['track']) : null,
@@ -191,7 +187,60 @@ async function fetchFirms(firmsKey: string): Promise<FireSpot[]> {
       confidence: row['confidence'] || null,
     })
   }
-  return spots
+  return { spots, foraDoPr }
+}
+
+/**
+ * Reclassifica focos gravados sem ibge_code (anteriores ao ponto-no-poligono):
+ * dentro do PR ganham municipality/ibge_code; fora do PR sao apagados. Cada
+ * linha tratada sai do filtro (ibge_code preenchido ou apagada), entao o laco
+ * termina; o teto de paginas so protege o wall-clock da Edge Function.
+ */
+async function backfillFireSpots(
+  client: SupabaseClient,
+): Promise<{ atualizados: number; apagados: number; erros: number }> {
+  let atualizados = 0
+  let apagados = 0
+  let erros = 0
+  for (let pagina = 0; pagina < 10; pagina++) {
+    const { data, error } = await client
+      .from('fire_spots')
+      .select('id,latitude,longitude,acq_date')
+      .is('ibge_code', null)
+      .limit(1000)
+    if (error) {
+      console.warn(`backfill fire_spots: ${error.message}`)
+      erros++
+      break
+    }
+    const linhas = (data ?? []) as { id: string; latitude: number; longitude: number; acq_date: string }[]
+    if (linhas.length === 0) break
+    const atualizar: Record<string, unknown>[] = []
+    const apagar: string[] = []
+    for (const l of linhas) {
+      const mun = municipioDoPonto(l.latitude, l.longitude)
+      if (mun === null) apagar.push(l.id)
+      else atualizar.push({ ...l, municipality: mun.nome, ibge_code: mun.ibge })
+    }
+    for (let i = 0; i < atualizar.length; i += 200) {
+      const { error: upErr } = await client
+        .from('fire_spots')
+        .upsert(atualizar.slice(i, i + 200), { onConflict: 'id' })
+      if (upErr) {
+        console.warn(`backfill fire_spots upsert: ${upErr.message}`)
+        erros++
+      } else atualizados += Math.min(200, atualizar.length - i)
+    }
+    for (let i = 0; i < apagar.length; i += 100) {
+      const { error: delErr } = await client.from('fire_spots').delete().in('id', apagar.slice(i, i + 100))
+      if (delErr) {
+        console.warn(`backfill fire_spots delete: ${delErr.message}`)
+        erros++
+      } else apagados += Math.min(100, apagar.length - i)
+    }
+    if (erros > 0) break
+  }
+  return { atualizados, apagados, erros }
 }
 
 /** Insert um a um com dedup por 23505 (ver cabecalho). */
@@ -352,7 +401,7 @@ async function fetchAnaRivers(): Promise<RiverRecord[]> {
   const dateStart = ddmmyyyy(new Date(now.getTime() - 86_400_000))
 
   for (const est of ESTACOES_RIOS_PR) {
-    const fallback: RiverRecord = {
+    const base: RiverRecord = {
       station_code: est.code,
       station_name: est.name,
       river_name: est.river,
@@ -370,28 +419,31 @@ async function fetchAnaRivers(): Promise<RiverRecord[]> {
         `?codEstacao=${est.code}&dataInicio=${dateStart}&dataFim=${dateEnd}`
       const resp = await requestWithRetry(url, { maxRetries: 3, timeoutMs: 30_000 })
       if (resp === null || resp.status !== 200) {
-        console.warn(`ANA ${est.code}: ${resp === null ? 'sem conexao' : `HTTP ${resp.status}`}`)
-        records.push(fallback)
+        console.warn(`ANA ${est.code}: ${resp === null ? 'sem conexao' : `HTTP ${resp.status}`} (mantida a ultima leitura)`)
         continue
       }
       const parsed = parseAnaXml(await resp.text())
       if (parsed === null) {
-        console.warn(`ANA ${est.code}: XML sem dados`)
-        records.push(fallback)
+        console.warn(`ANA ${est.code}: XML sem dados (mantida a ultima leitura)`)
         continue
       }
-      const levelCm = parsed.nivel && parsed.nivel.trim() ? Number(parsed.nivel) : null
+      const levelRaw = parsed.nivel && parsed.nivel.trim() ? Number(parsed.nivel) : null
+      const levelCm = Number.isFinite(levelRaw as number) ? levelRaw : null
+      const observedAt = dataHoraAnaIso(parsed.dataHora)
+      if (levelCm === null || observedAt === null) {
+        console.warn(`ANA ${est.code}: leitura sem nivel ou sem data (mantida a ultima leitura)`)
+        continue
+      }
       const flow = parsed.vazao && parsed.vazao.trim() ? Number(parsed.vazao) : null
       records.push({
-        ...fallback,
-        level_cm: Number.isFinite(levelCm as number) ? levelCm : null,
+        ...base,
+        level_cm: levelCm,
         flow_m3s: Number.isFinite(flow as number) ? flow : null,
-        alert_level: getAlertLevel(est.code, Number.isFinite(levelCm as number) ? levelCm : null),
-        observed_at: parsed.dataHora || now.toISOString(),
+        alert_level: getAlertLevel(est.code, levelCm),
+        observed_at: observedAt,
       })
     } catch (e) {
-      console.warn(`ANA ${est.code}: ${(e as Error).message}`)
-      records.push(fallback)
+      console.warn(`ANA ${est.code}: ${(e as Error).message} (mantida a ultima leitura)`)
     }
   }
   return records
@@ -427,11 +479,14 @@ Deno.serve((req: Request) =>
 
     // 1/3 FIRMS
     let firmsCount = 0
+    let firmsForaDoPr = 0
     let firmsStats = { inserted: 0, skipped: 0, errors: 0 }
+    let backfill = { atualizados: 0, apagados: 0, erros: 0 }
     try {
       if (firmsKey === 'DEMO_KEY') console.warn('FIRMS rodando com DEMO_KEY')
-      const spots = await fetchFirms(firmsKey)
+      const { spots, foraDoPr } = await fetchFirms(firmsKey)
       firmsCount = spots.length
+      firmsForaDoPr = foraDoPr
       if (spots.length > 0) {
         firmsStats = await insertFireSpotsDedupe(client, spots)
         if (firmsStats.errors > 0) errors.push(`FIRMS insert: ${firmsStats.errors} records falharam`)
@@ -440,6 +495,8 @@ Deno.serve((req: Request) =>
         const { error: delError } = await client.from('fire_spots').delete().lt('acq_date', cutoff)
         if (delError) console.warn(`limpeza fire_spots: ${delError.message}`)
       }
+      backfill = await backfillFireSpots(client)
+      if (backfill.erros > 0) errors.push(`FIRMS backfill: ${backfill.erros} erro(s)`)
     } catch (e) {
       errors.push(`FIRMS: ${(e as Error).message}`)
     }
@@ -494,6 +551,9 @@ Deno.serve((req: Request) =>
       firms_spots: firmsCount,
       firms_inserted: firmsStats.inserted,
       firms_deduped: firmsStats.skipped,
+      firms_fora_do_pr: firmsForaDoPr,
+      firms_backfill_atualizados: backfill.atualizados,
+      firms_backfill_apagados: backfill.apagados,
       aqicn_cities: aqicnCount,
       ana_stations: anaCount,
       errors,

@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
-"""ETL Ambiente: NASA FIRMS focos de calor + ANA rios + AQICN qualidade do ar."""
+"""ETL Ambiente: NASA FIRMS focos de calor + ANA rios + AQICN qualidade do ar.
+
+Foco -> municipio por ponto-no-poligono (scripts/pr_geo.py, mesma regra de
+supabase/functions/_shared/pr_geo.ts): grava municipality e ibge_code e
+descarta foco fora do PR. Focos antigos sem ibge_code sao reclassificados a
+cada execucao (_backfill_fire_spots). Estacao da ANA sem leitura valida nao
+e gravada: a ultima leitura real fica com a sua data.
+"""
 
 import os
 import io
+import re
 import csv
 import json
 import time
@@ -12,6 +20,8 @@ from datetime import datetime, timedelta
 from supabase import create_client
 from dotenv import load_dotenv
 
+from pr_geo import municipio_do_ponto
+
 load_dotenv()
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -19,8 +29,10 @@ SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 NASA_FIRMS_KEY = os.environ.get("NASA_FIRMS_KEY", "DEMO_KEY")
 WAQI_TOKEN = os.environ.get("WAQI_TOKEN", "demo")
 
-# Bounding box Paraná: lon_min, lat_min, lon_max, lat_max
-PR_BBOX = "-54,-26.7,-48.0,-22.5"
+# Bounding box Paraná: lon_min, lat_min, lon_max, lat_max. O PR vai de
+# -54,62 a -48,02 de longitude e de -26,72 a -22,52 de latitude; ate 2026-10
+# o bbox comecava em -54 e 11 municipios do extremo Oeste ficavam de fora.
+PR_BBOX = "-54.7,-26.8,-47.9,-22.4"
 
 CIDADES_AR = [
     {"id": "curitiba", "slug": "curitiba"},
@@ -54,119 +66,6 @@ CIDADES_AR_GEO = {
     "paranagua": {"lat": -25.5169, "lon": -48.7296},
     "apucarana": {"lat": -23.5707, "lon": -51.4635},
 }
-
-# Município centroides para mapeamento de focos de incêndio por proximidade
-MUNICIPIOS_PR_CENTROIDES = {
-    "Curitiba": {"lat": -25.4284, "lon": -49.2733},
-    "Londrina": {"lat": -23.3100, "lon": -51.1624},
-    "Maringá": {"lat": -23.4250, "lon": -51.9386},
-    "Foz do Iguaçu": {"lat": -25.5951, "lon": -54.5838},
-    "São José dos Pinhais": {"lat": -25.5307, "lon": -49.2000},
-    "Pinhais": {"lat": -25.3914, "lon": -49.0970},
-    "Almirante Tamandaré": {"lat": -25.5169, "lon": -49.0758},
-    "Colombo": {"lat": -25.2928, "lon": -49.2174},
-    "Araucária": {"lat": -25.5729, "lon": -49.4281},
-    "Piraquara": {"lat": -25.4797, "lon": -48.9933},
-    "Campo Largo": {"lat": -25.4501, "lon": -49.5147},
-    "Apucarana": {"lat": -23.5707, "lon": -51.4635},
-    "Arapongas": {"lat": -23.4186, "lon": -51.4300},
-    "Cambé": {"lat": -23.2628, "lon": -51.1258},
-    "Cornélio Procópio": {"lat": -23.1871, "lon": -50.6475},
-    "Cascavel": {"lat": -24.9545, "lon": -53.4596},
-    "Toledo": {"lat": -24.7257, "lon": -53.7406},
-    "Paranaguá": {"lat": -25.5169, "lon": -48.7296},
-    "Guaratuba": {"lat": -26.2353, "lon": -48.7889},
-    "Ponta Grossa": {"lat": -25.0959, "lon": -50.1647},
-}
-
-
-def haversine_distance(lat1, lon1, lat2, lon2):
-    """Calcula distancia em km entre dois pontos lat/lon."""
-    from math import radians, cos, sin, asin, sqrt
-    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    c = 2 * asin(sqrt(a))
-    r = 6371
-    return c * r
-
-
-_CENTROIDS_CACHE: list[tuple[str, float, float]] | None = None
-
-
-def _load_all_centroids() -> list[tuple[str, float, float]]:
-    """Carrega centroides de TODOS os 399 municipios do PR do geojson.
-
-    Calcula o centroide como media aritmetica das coordenadas do anel
-    externo do poligono. Precisao suficiente para matching de focos
-    FIRMS por proximidade (tipicamente < 50km do centro do muni).
-
-    Fallback para o dict hardcoded MUNICIPIOS_PR_CENTROIDES se o
-    geojson nao estiver acessivel.
-    """
-    global _CENTROIDS_CACHE
-    if _CENTROIDS_CACHE is not None:
-        return _CENTROIDS_CACHE
-
-    geojson_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "public", "data", "municipios-pr.geojson",
-    )
-    centroids: list[tuple[str, float, float]] = []
-    try:
-        with open(geojson_path, "r", encoding="utf-8") as fp:
-            gj = json.load(fp)
-        for feat in gj.get("features", []):
-            props = feat.get("properties", {})
-            name = props.get("NM_MUN") or props.get("nome") or props.get("name")
-            geom = feat.get("geometry", {})
-            if not name or not geom:
-                continue
-            coords_list: list[list[float]] = []
-            if geom.get("type") == "Polygon":
-                coords_list = geom.get("coordinates", [[]])[0]
-            elif geom.get("type") == "MultiPolygon":
-                # Usa o primeiro poligono (ilhas/dependencias territoriais raras)
-                polys = geom.get("coordinates", [])
-                if polys and polys[0]:
-                    coords_list = polys[0][0]
-            if not coords_list:
-                continue
-            lons = [c[0] for c in coords_list if len(c) >= 2]
-            lats = [c[1] for c in coords_list if len(c) >= 2]
-            if not lons or not lats:
-                continue
-            centroids.append((name, sum(lats) / len(lats), sum(lons) / len(lons)))
-        print(f"  Centroides carregados do geojson: {len(centroids)} municipios")
-    except Exception as err:
-        print(f"  WARN falha ao carregar geojson ({err}); usando fallback de 20 munis")
-        centroids = [
-            (name, c["lat"], c["lon"])
-            for name, c in MUNICIPIOS_PR_CENTROIDES.items()
-        ]
-
-    _CENTROIDS_CACHE = centroids
-    return centroids
-
-
-def find_nearest_municipality(lat, lon, max_distance_km=80):
-    """Encontra o municipio mais proximo de um foco de incendio.
-
-    Busca em todos os 399 municipios via centroides calculados do geojson.
-    Raio ampliado de 50km para 80km porque alguns municipios grandes do PR
-    (Foz, Guarapuava, Umuarama) tem centroides deslocados do limite oeste.
-    """
-    centroids = _load_all_centroids()
-    nearest = None
-    min_distance = float("inf")
-    for name, clat, clon in centroids:
-        dist = haversine_distance(lat, lon, clat, clon)
-        if dist < min_distance and dist <= max_distance_km:
-            min_distance = dist
-            nearest = name
-    return nearest
-
 
 def request_with_retry(url, method='GET', max_retries=3, timeout=30, **kwargs):
     """
@@ -249,15 +148,20 @@ def fetch_firms():
 
         reader = csv.DictReader(io.StringIO(resp.text))
         spots = []
+        fora_do_pr = 0
         for row in reader:
             try:
                 lat = float(row.get("latitude", 0))
                 lon = float(row.get("longitude", 0))
-                municipio = find_nearest_municipality(lat, lon)
+                municipio = municipio_do_ponto(lat, lon)
+                if municipio is None:
+                    fora_do_pr += 1
+                    continue
                 spots.append({
                     "latitude": lat,
                     "longitude": lon,
-                    "municipality": municipio,
+                    "municipality": municipio["nome"],
+                    "ibge_code": municipio["ibge"],
                     "brightness": float(row.get("bright_ti4", 0)) if row.get("bright_ti4") else None,
                     "scan": float(row.get("scan", 0)) if row.get("scan") else None,
                     "track": float(row.get("track", 0)) if row.get("track") else None,
@@ -269,7 +173,7 @@ def fetch_firms():
                 })
             except:
                 continue
-        print(f"FIRMS: {len(spots)} focos encontrados")
+        print(f"FIRMS: {len(spots)} focos no PR ({fora_do_pr} fora do PR descartados)")
         return spots
     except Exception as e:
         print(f"Erro FIRMS: {e}")
@@ -424,6 +328,20 @@ def _parse_ana_xml_robust(xml_content):
     return dados, None
 
 
+def data_hora_ana_iso(data_hora):
+    """Data/hora da ANA vem em horario de Brasilia e sem fuso; gravada assim
+    num timestamptz virava UTC e a leitura parecia 3 h mais velha. ISO sem
+    fuso ganha -03:00; qualquer outro formato passa como veio."""
+    if not data_hora:
+        return None
+    t = data_hora.strip()
+    if not t:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$", t):
+        return t.replace(" ", "T") + "-03:00"
+    return t
+
+
 def fetch_ana_rivers():
     """Busca dados telemétricos de rios do PR via API SAR/ANA com retry e parsing robusto."""
     records = []
@@ -438,70 +356,22 @@ def fetch_ana_rivers():
             resp = request_with_retry(url, method='GET', max_retries=3, timeout=30)
 
             if resp is None:
-                print(f"  Estação {est['code']}: Falha de conexão após retries")
-                records.append({
-                    "station_code": est["code"],
-                    "station_name": est["name"],
-                    "river_name": est["river"],
-                    "municipality": est["municipality"],
-                    "latitude": est.get("lat"),
-                    "longitude": est.get("lon"),
-                    "level_cm": None,
-                    "flow_m3s": None,
-                    "alert_level": "normal",
-                    "observed_at": datetime.now().isoformat(),
-                })
+                print(f"  Estação {est['code']}: Falha de conexão após retries (mantida a ultima leitura)")
                 continue
 
             if resp.status_code != 200:
-                print(f"  Estação {est['code']}: HTTP {resp.status_code}")
-                records.append({
-                    "station_code": est["code"],
-                    "station_name": est["name"],
-                    "river_name": est["river"],
-                    "municipality": est["municipality"],
-                    "latitude": est.get("lat"),
-                    "longitude": est.get("lon"),
-                    "level_cm": None,
-                    "flow_m3s": None,
-                    "alert_level": "normal",
-                    "observed_at": datetime.now().isoformat(),
-                })
+                print(f"  Estação {est['code']}: HTTP {resp.status_code} (mantida a ultima leitura)")
                 continue
 
             # Parse XML robusto
             dados, err = _parse_ana_xml_robust(resp.content)
             if dados is None:
-                print(f"  Estação {est['code']}: Parse XML falhou - {err}")
-                records.append({
-                    "station_code": est["code"],
-                    "station_name": est["name"],
-                    "river_name": est["river"],
-                    "municipality": est["municipality"],
-                    "latitude": est.get("lat"),
-                    "longitude": est.get("lon"),
-                    "level_cm": None,
-                    "flow_m3s": None,
-                    "alert_level": "normal",
-                    "observed_at": datetime.now().isoformat(),
-                })
+                print(f"  Estação {est['code']}: Parse XML falhou - {err} (mantida a ultima leitura)")
                 continue
 
             # Pegar último registro (mais recente)
             if not dados:
-                print(f"  Estação {est['code']}: Nenhum dado disponível")
-                records.append({
-                    "station_code": est["code"],
-                    "station_name": est["name"],
-                    "river_name": est["river"],
-                    "municipality": est["municipality"],
-                    "latitude": est.get("lat"),
-                    "longitude": est.get("lon"),
-                    "level_cm": None,
-                    "flow_m3s": None,
-                    "alert_level": "normal",
-                    "observed_at": datetime.now().isoformat(),
-                })
+                print(f"  Estação {est['code']}: Nenhum dado disponível (mantida a ultima leitura)")
                 continue
 
             ultimo = dados[-1]
@@ -522,6 +392,10 @@ def fetch_ana_rivers():
 
             level_cm = float(nivel) if nivel and nivel.strip() else None
             flow_m3s = float(vazao) if vazao and vazao.strip() else None
+            observed_at = data_hora_ana_iso(data_hora)
+            if level_cm is None or observed_at is None:
+                print(f"  Estação {est['code']}: leitura sem nivel ou sem data (mantida a ultima leitura)")
+                continue
 
             records.append({
                 "station_code": est["code"],
@@ -533,24 +407,11 @@ def fetch_ana_rivers():
                 "level_cm": level_cm,
                 "flow_m3s": flow_m3s,
                 "alert_level": get_alert_level(est["code"], level_cm),
-                "observed_at": data_hora or now.isoformat(),
+                "observed_at": observed_at,
             })
 
         except Exception as e:
-            print(f"  Erro estação {est['code']}: {e}")
-            # Adicionar com dados de fallback
-            records.append({
-                "station_code": est["code"],
-                "station_name": est["name"],
-                "river_name": est["river"],
-                "municipality": est["municipality"],
-                "latitude": est.get("lat"),
-                "longitude": est.get("lon"),
-                "level_cm": None,
-                "flow_m3s": None,
-                "alert_level": "normal",
-                "observed_at": datetime.now().isoformat(),
-            })
+            print(f"  Erro estação {est['code']}: {e} (mantida a ultima leitura)")
 
     print(f"ANA: {len(records)} estações coletadas")
     return records
@@ -582,6 +443,55 @@ def _insert_fire_spots_dedupe(supabase, records):
             else:
                 errors += 1
     return inserted, skipped, errors
+
+
+def _backfill_fire_spots(supabase):
+    """Reclassifica focos gravados sem ibge_code (anteriores ao ponto-no-poligono):
+    dentro do PR ganham municipality/ibge_code; fora do PR sao apagados. Cada
+    linha tratada sai do filtro, entao o laco termina; o teto de paginas so
+    limita a duracao."""
+    atualizados = apagados = erros = 0
+    for _pagina in range(10):
+        try:
+            linhas = (
+                supabase.table("fire_spots")
+                .select("id,latitude,longitude,acq_date")
+                .is_("ibge_code", "null")
+                .limit(1000)
+                .execute()
+                .data
+                or []
+            )
+        except Exception as e:
+            print(f"  Aviso backfill fire_spots: {e}")
+            erros += 1
+            break
+        if not linhas:
+            break
+        atualizar, apagar = [], []
+        for l in linhas:
+            mun = municipio_do_ponto(l["latitude"], l["longitude"])
+            if mun is None:
+                apagar.append(l["id"])
+            else:
+                atualizar.append({**l, "municipality": mun["nome"], "ibge_code": mun["ibge"]})
+        for i in range(0, len(atualizar), 200):
+            try:
+                supabase.table("fire_spots").upsert(atualizar[i:i + 200], on_conflict="id").execute()
+                atualizados += len(atualizar[i:i + 200])
+            except Exception as e:
+                print(f"  Aviso backfill upsert: {e}")
+                erros += 1
+        for i in range(0, len(apagar), 100):
+            try:
+                supabase.table("fire_spots").delete().in_("id", apagar[i:i + 100]).execute()
+                apagados += len(apagar[i:i + 100])
+            except Exception as e:
+                print(f"  Aviso backfill delete: {e}")
+                erros += 1
+        if erros:
+            break
+    return atualizados, apagados, erros
 
 
 def _try_upsert_with_fallback(supabase, table_name, records, conflict_field):
@@ -647,6 +557,10 @@ def main():
                 print(f"  Aviso ao limpar focos antigos: {e}")
         else:
             print("  Nenhum foco encontrado (pode ser periodo sem queimadas)")
+        atualizados, apagados, err_bf = _backfill_fire_spots(supabase)
+        print(f"  Backfill: {atualizados} focos antigos reclassificados, {apagados} fora do PR apagados")
+        if err_bf:
+            errors.append(f"FIRMS backfill: {err_bf} erro(s)")
     except Exception as e:
         print(f"  ERRO FIRMS: {e}")
         errors.append(f"FIRMS: {e}")

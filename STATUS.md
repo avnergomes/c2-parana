@@ -1,6 +1,43 @@
 # DataGeo PR — Status de Implementação (ex-c2-parana)
 
-**Última atualização:** 2026-08-25
+**Última atualização:** 2026-10-28
+
+> **2026-10-28 — IRTC v1.1: correções de leitura (mesma fórmula e pesos).**
+> A reavaliação do IRTC encontrou erros de dado que distorciam o índice:
+>
+> - **Dengue:** 27 dos 50 códigos IBGE do TIER1 (run rápido de quarta e
+>   sexta) apontavam para outro município (Colombo → Cianorte, Marechal
+>   Cândido Rondon → Morretes…) e 3 nem existiam. Corrigidos em
+>   `etl-saude` e `etl_saude.py`.
+> - **Clima:** Apucarana gravava com código inexistente e Campo Mourão com o
+>   de Cândido de Abreu (`etl-clima`, `etl_clima.py`); mesmos códigos errados
+>   nos fallbacks do `etl-agro` (mais Paranavaí e Assis Chateaubriand).
+> - **Focos (FIRMS):** bbox começava em −54 (11 municípios do extremo Oeste
+>   fora) e o município era o do centróide mais próximo até 80 km (≈28% da
+>   área do PR caía no vizinho; focos de SP/SC/MS entravam no PR). Agora é
+>   ponto-no-polígono (`_shared/pr_geo.ts` + `pr_geometria.ts`, gerado por
+>   `scripts/gen_pr_geometria.py`; espelho `scripts/pr_geo.py`), com
+>   `ibge_code` gravado, foco fora do PR descartado e reclassificação dos
+>   focos antigos a cada run. `_shared/pr_centroids.ts` removido.
+> - **ANA:** falha virava registro `normal` com `observed_at = agora` e
+>   contava como dado no hidro. Agora a estação sem leitura válida não é
+>   gravada, e a data da ANA ganha o fuso de Brasília.
+> - **IRTC (`etl-irtc` v1.1 + `etl_irtc.py`):** focos por `ibge_code` com
+>   paginação (o teto de 1000 linhas truncava a contagem); rio só com
+>   leitura de até 12 h; dengue só com semana de até 28 dias; clima de até
+>   36 h; classe pelo corte “>= limite”, igual aos painéis; `has_*` por
+>   domínio e `versao_metodo` gravados (migration **054**). Regras puras em
+>   `etl-irtc/calc.ts`. `public-api` `/v1/irtc` com colunas congeladas.
+> - **Testes Deno** (`npx deno test --allow-read supabase/functions/`):
+>   listas IBGE de todos os ETLs conferidas contra `pr_municipios`,
+>   ponto-no-polígono e regras do IRTC; passo novo no `ci.yml`.
+> - **ORDEM DE DEPLOY:** `db push` da 054 → deploy de `etl-ambiente`,
+>   `etl-irtc`, `etl-saude`, `etl-clima`, `etl-agro` e `public-api`. Os
+>   workflows Python das Fases 2-4 seguem com `schedule` (cutover pendente);
+>   como Python e Deno foram corrigidos igual, o dual-run grava o mesmo
+>   resultado.
+
+**Última atualização anterior:** 2026-08-25
 
 > **2026-08-25 — Migração dos ETLs para Supabase: Fases 2 a 5 implementadas.**
 > Todo o restante do plano (`docs/PLANO_MIGRACAO_SUPABASE.md`) foi executado

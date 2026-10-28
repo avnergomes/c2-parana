@@ -7,11 +7,19 @@ hidrologia (níveis de rios) e qualidade do ar, todos já presentes no Supabase.
 Fórmula:
   IRTC = 0.25*R_clima + 0.25*R_saude + 0.20*R_ambiente + 0.15*R_hidro + 0.15*R_ar
 
-Níveis de risco:
-  0-25  → baixo
-  26-50 → médio
-  51-75 → alto
-  76-100 → crítico
+Níveis de risco (corte ">= limite", igual aos paineis):
+  < 25  → baixo
+  < 50  → médio
+  < 75  → alto
+  >= 75 → crítico
+
+v1.1 (2026-10, mesma formula e mesmos pesos; correcoes de leitura, espelhadas
+em supabase/functions/etl-irtc):
+  - focos contados por ibge_code (ponto-no-poligono no etl_ambiente), com
+    paginacao: o teto de 1000 linhas do PostgREST truncava a contagem;
+  - rio so com leitura de nivel real de ate 12 h;
+  - dengue so com semana epidemiologica de ate 28 dias; clima de ate 36 h;
+  - has_* por dominio e versao_metodo gravados (migration 054).
 """
 
 import os
@@ -19,7 +27,7 @@ import json
 import sys
 import time
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -50,6 +58,17 @@ W_AMBIENTE = 0.20
 W_HIDRO = 0.15
 W_AR = 0.15
 
+# Versao do metodo gravada em irtc_scores.versao_metodo
+VERSAO_METODO = "v1.1"
+
+# Leitura mais velha que isso nao conta como dado do dominio
+CLIMA_MAX_IDADE_H = 36
+RIO_MAX_IDADE_H = 12
+DENGUE_MAX_IDADE_DIAS = 28
+
+PAGINA = 1000
+MAX_PAGINAS = 50
+
 
 # ─── HELPERS ──────────────────────────────────────────────────────────
 
@@ -64,6 +83,69 @@ def postgrest_get(table, select="*", params=None):
         print(f"  WARN: GET {table} retornou HTTP {resp.status_code}: {resp.text[:200]}")
         return []
     return resp.json()
+
+
+def postgrest_get_all(table, select, params=None, order="id"):
+    """GET paginado. O PostgREST corta cada resposta em max_rows (1000), entao
+    `limit=5000` nunca trazia mais de 1000 linhas."""
+    linhas = []
+    for pagina in range(MAX_PAGINAS):
+        p = dict(params or {})
+        p["order"] = order
+        p["limit"] = str(PAGINA)
+        p["offset"] = str(pagina * PAGINA)
+        url = f"{SUPABASE_URL}/rest/v1/{table}?select={select}"
+        for k, v in p.items():
+            url += f"&{k}={v}"
+        resp = requests.get(url, headers=HEADERS, timeout=30)
+        if resp.status_code != 200:
+            raise RuntimeError(f"GET {table} HTTP {resp.status_code}: {resp.text[:200]}")
+        lote = resp.json()
+        linhas.extend(lote)
+        if len(lote) < PAGINA:
+            return linhas
+    print(f"  WARN: {table} parou em {MAX_PAGINAS} paginas")
+    return linhas
+
+
+def agora_utc():
+    return datetime.now(timezone.utc)
+
+
+def _parse_ts(valor):
+    if not valor:
+        return None
+    try:
+        t = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def leitura_fresca(observed_at, agora, max_horas):
+    """Leitura com timestamp de ate `max_horas` horas atras."""
+    t = _parse_ts(observed_at)
+    return t is not None and (agora - t) <= timedelta(hours=max_horas)
+
+
+def inicio_semana_epi(ano, semana):
+    """Inicio (domingo) da semana epidemiologica do SINAN: a semana 1 e a que
+    contem o dia 4 de janeiro, contada de domingo a sabado."""
+    jan4 = datetime(ano, 1, 4, tzinfo=timezone.utc)
+    domingo_semana1 = jan4 - timedelta(days=(jan4.weekday() + 1) % 7)
+    return domingo_semana1 + timedelta(weeks=semana - 1)
+
+
+def semana_epi_fresca(ano, semana, agora, max_dias=DENGUE_MAX_IDADE_DIAS):
+    """A semana epidemiologica terminou ha no maximo `max_dias` dias?"""
+    try:
+        ano, semana = int(ano), int(semana)
+    except (TypeError, ValueError):
+        return False
+    if semana < 1:
+        return False
+    fim = inicio_semana_epi(ano, semana) + timedelta(days=7)
+    return (agora - fim) <= timedelta(days=max_dias)
 
 
 def postgrest_upsert(table, records, on_conflict="ibge_code"):
@@ -111,7 +193,7 @@ def load_municipalities_from_geojson():
 
 # ─── FETCH DATA ───────────────────────────────────────────────────────
 
-def fetch_climate_data():
+def fetch_climate_data(agora):
     """Busca dados climaticos: valor mais recente + precipitacao acumulada 72h.
 
     Duas passagens na mesma tabela:
@@ -131,21 +213,22 @@ def fetch_climate_data():
         ibge = rec.get("ibge_code")
         if not ibge or ibge in by_municipality:
             continue
+        # Leitura velha (estacao parada) nao conta: o municipio fica sem dado.
+        fresca = leitura_fresca(rec.get("observed_at"), agora, CLIMA_MAX_IDADE_H)
         by_municipality[ibge] = {
-            "temperature": rec.get("temperature"),
-            "humidity": rec.get("humidity"),
+            "temperature": rec.get("temperature") if fresca else None,
+            "humidity": rec.get("humidity") if fresca else None,
             "precipitation_72h": 0.0,
         }
 
-    # 2. Precipitacao acumulada 72h por ibge
-    cutoff_72h = (datetime.now() - timedelta(hours=72)).isoformat()
-    precip_records = postgrest_get(
+    # 2. Precipitacao acumulada 72h por ibge (paginado)
+    cutoff_72h = (agora - timedelta(hours=72)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    precip_records = postgrest_get_all(
         "climate_data",
-        select="ibge_code,precipitation,observed_at",
+        select="id,ibge_code,precipitation",
         params={
             "observed_at": f"gte.{cutoff_72h}",
             "precipitation": "not.is.null",
-            "limit": "5000",
         },
     )
     precip_sum: dict[str, float] = defaultdict(float)
@@ -170,8 +253,11 @@ def fetch_climate_data():
     return by_municipality
 
 
-def fetch_dengue_data():
-    """Busca dados de dengue mais recentes por município."""
+def fetch_dengue_data(agora):
+    """Busca dados de dengue mais recentes por município.
+
+    Semana mais recente velha demais (ETL parado) fica sem dado, em vez de o
+    nivel antigo seguir contando."""
     records = postgrest_get(
         "dengue_data",
         select="ibge_code,alert_level,epidemiological_week,year",
@@ -179,19 +265,26 @@ def fetch_dengue_data():
     )
     # Agrupar por município (pegar semana mais recente)
     by_municipality = {}
+    vistos = set()
     for rec in records:
         ibge = rec.get("ibge_code")
-        if not ibge or ibge in by_municipality:
+        if not ibge or ibge in vistos:
+            continue
+        vistos.add(ibge)
+        if not semana_epi_fresca(rec.get("year"), rec.get("epidemiological_week"), agora):
             continue
         by_municipality[ibge] = {
             "alert_level": rec.get("alert_level", 0),
         }
-    print(f"  Dengue: {len(by_municipality)} municípios com dados")
+    print(f"  Dengue: {len(by_municipality)} municípios com dado recente ({len(vistos)} com algum dado)")
     return by_municipality
 
 
-def fetch_fire_spots():
-    """Busca focos de incêndio dos últimos 30 dias agrupados por município.
+def fetch_fire_spots(agora, name_lookup):
+    """Busca focos de incêndio dos últimos 30 dias agrupados por ibge_code.
+
+    O etl_ambiente grava ibge_code por ponto-no-poligono; focos antigos sem
+    ibge_code caem no casamento por nome. Paginado (teto de 1000 linhas).
 
     Janela 30d (vs 7d anterior) porque fora do periodo de seca (set-mar)
     os focos sao esparsos e a janela curta mantinha todos os munis em zero.
@@ -199,22 +292,22 @@ def fetch_fire_spots():
     isso permite que munis com queimada isolada apareçam como risco baixo
     em vez de serem diluidos.
     """
-    cutoff = (datetime.now() - timedelta(days=30)).date().isoformat()
-    records = postgrest_get(
+    cutoff = (agora - timedelta(days=30)).date().isoformat()
+    records = postgrest_get_all(
         "fire_spots",
-        select="municipality,acq_date",
-        params={"acq_date": f"gte.{cutoff}", "limit": "5000"},
+        select="id,ibge_code,municipality",
+        params={"acq_date": f"gte.{cutoff}"},
     )
     counts = defaultdict(int)
     for rec in records:
-        mun = rec.get("municipality")
-        if mun:
-            counts[mun] += 1
+        ibge = rec.get("ibge_code") or match_name_to_ibge(rec.get("municipality"), name_lookup)
+        if ibge:
+            counts[ibge] += 1
     print(f"  Focos: {sum(counts.values())} focos em {len(counts)} municipios (ultimos 30 dias)")
     return counts
 
 
-def fetch_river_levels():
+def fetch_river_levels(agora, name_lookup):
     """Busca niveis de rios por estacao, mapeando para municipios.
 
     Bug latente corrigido em 2026-04-17: o default 'existing' era 'normal'
@@ -225,28 +318,33 @@ def fetch_river_levels():
 
     Fix: insere sempre na primeira ocorrencia; so atualiza se novo nivel
     for pior que o ja registrado.
+
+    v1.1: so conta estacao com nivel real lido ha ate 12 h; chave por ibge.
     """
     records = postgrest_get(
         "river_levels",
-        select="station_code,municipality,alert_level",
+        select="station_code,municipality,alert_level,level_cm,observed_at",
     )
     alert_priority = {"normal": 0, "attention": 1, "alert": 2, "emergency": 3}
-    by_municipality: dict[str, str] = {}
+    by_ibge: dict[str, str] = {}
     for rec in records:
         mun = rec.get("municipality")
-        if not mun:
+        if not mun or rec.get("level_cm") is None:
+            continue
+        if not leitura_fresca(rec.get("observed_at"), agora, RIO_MAX_IDADE_H):
+            continue
+        ibge = match_name_to_ibge(mun, name_lookup)
+        if not ibge:
             continue
         level = rec.get("alert_level") or "normal"
-        existing = by_municipality.get(mun)
-        if existing is None:
-            by_municipality[mun] = level
-        elif alert_priority.get(level, 0) > alert_priority.get(existing, 0):
-            by_municipality[mun] = level
-    print(f"  Rios: {len(by_municipality)} municipios com estacao")
-    return by_municipality
+        existing = by_ibge.get(ibge)
+        if existing is None or alert_priority.get(level, 0) > alert_priority.get(existing, 0):
+            by_ibge[ibge] = level
+    print(f"  Rios: {len(by_ibge)} municipios com leitura recente")
+    return by_ibge
 
 
-def fetch_cemaden_hydro_scores():
+def fetch_cemaden_hydro_scores(agora):
     """Busca alertas CEMADEN ativos com dominio hidrologico por ibge_code.
 
     CEMADEN cobre 26+ cidades do PR vs 8 estacoes da ANA — complemento
@@ -262,8 +360,8 @@ def fetch_cemaden_hydro_scores():
     Retorna dict {ibge_code: score_max} (pega o mais severo quando ha mais
     de um alerta ativo pro mesmo muni).
     """
-    cutoff = (datetime.now() - timedelta(days=3)).isoformat()
-    now_iso = datetime.now().isoformat()
+    cutoff = (agora - timedelta(days=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_iso = agora.strftime("%Y-%m-%dT%H:%M:%SZ")
     records = postgrest_get(
         "cemaden_alerts",
         select="ibge_code,alert_type,severity,expires_at,issued_at",
@@ -369,7 +467,7 @@ def calc_r_saude(alert_level):
     return (0, False)
 
 
-def calc_r_ambiente(fire_count):
+def calc_r_ambiente(fire_count, leitura_ok=True):
     """Calcula risco ambiental (0-100) baseado em focos de incendio em 30d.
 
     Com janela 30d (vs 7d), os thresholds foram recalibrados pra refletir
@@ -382,8 +480,11 @@ def calc_r_ambiente(fire_count):
 
     Returns (score, has_data): has_data is always True for ambiente because
     FIRMS satellite coverage is global — zero fires IS a valid reading
-    ("no fires detected"), not missing data.
+    ("no fires detected"), not missing data. v1.1: has_data False only when
+    reading fire_spots failed in this run (leitura_ok=False).
     """
+    if not leitura_ok:
+        return (0, False)
     if fire_count <= 0:
         return (0, True)
     if fire_count <= 3:
@@ -429,12 +530,14 @@ def calc_r_ar(aqi):
 
 
 def classify_risk_level(irtc):
-    """Classifica o nível de risco baseado no IRTC."""
-    if irtc <= 25:
+    """Classifica o nível de risco pelo corte ">= limite" (o mesmo dos
+    paineis; ate 2026-10 era "<= limite" e 75,00 era "alto" aqui e
+    "critico" no console)."""
+    if irtc < 25:
         return "baixo"
-    if irtc <= 50:
+    if irtc < 50:
         return "médio"
-    if irtc <= 75:
+    if irtc < 75:
         return "alto"
     return "crítico"
 
@@ -505,6 +608,7 @@ CITY_TO_IBGE = {
 
 def main():
     start_time = datetime.now()
+    agora = agora_utc()
     errors = []
 
     # 1. Carregar lista de municípios do GeoJSON
@@ -522,7 +626,7 @@ def main():
     # 2. Buscar dados de cada domínio
     print("\n2/6 Buscando dados climáticos...")
     try:
-        climate_data = fetch_climate_data()
+        climate_data = fetch_climate_data(agora)
     except Exception as e:
         print(f"  ERRO clima: {e}")
         climate_data = {}
@@ -530,29 +634,31 @@ def main():
 
     print("\n3/6 Buscando dados de dengue...")
     try:
-        dengue_data = fetch_dengue_data()
+        dengue_data = fetch_dengue_data(agora)
     except Exception as e:
         print(f"  ERRO dengue: {e}")
         dengue_data = {}
         errors.append(f"dengue_data: {e}")
 
     print("\n4/6 Buscando focos de incêndio...")
+    fire_ok = True
     try:
-        fire_data = fetch_fire_spots()
+        fire_data = fetch_fire_spots(agora, name_lookup)
     except Exception as e:
         print(f"  ERRO focos: {e}")
         fire_data = defaultdict(int)
+        fire_ok = False
         errors.append(f"fire_spots: {e}")
 
     print("\n5/6 Buscando niveis de rios + CEMADEN hidro...")
     try:
-        river_data = fetch_river_levels()
+        river_data = fetch_river_levels(agora, name_lookup)
     except Exception as e:
         print(f"  ERRO rios: {e}")
         river_data = {}
         errors.append(f"river_levels: {e}")
     try:
-        cemaden_hydro = fetch_cemaden_hydro_scores()
+        cemaden_hydro = fetch_cemaden_hydro_scores(agora)
     except Exception as e:
         print(f"  WARN cemaden hidro: {e}")
         cemaden_hydro = {}
@@ -568,7 +674,7 @@ def main():
     # 3. Calcular IRTC para cada município
     print("\n" + "=" * 60)
     print("Calculando IRTC para cada município...")
-    now = datetime.now().isoformat()
+    now = agora.isoformat()
     irtc_records = []
     risk_distribution = defaultdict(int)
 
@@ -585,28 +691,14 @@ def main():
         saude = dengue_data.get(ibge_code, {})
         r_saude, r_saude_has = calc_r_saude(saude.get("alert_level", 0))
 
-        # R_ambiente: buscar por nome do município (text match)
-        fire_count = fire_data.get(mun_name, 0)
-        if fire_count == 0:
-            for fire_mun, count in fire_data.items():
-                matched_ibge = match_name_to_ibge(fire_mun, name_lookup)
-                if matched_ibge == ibge_code:
-                    fire_count = count
-                    break
-        r_ambiente, r_ambiente_has = calc_r_ambiente(fire_count)
+        # R_ambiente: focos por ibge_code (fetch_fire_spots ja resolve nomes)
+        r_ambiente, r_ambiente_has = calc_r_ambiente(fire_data.get(ibge_code, 0), fire_ok)
 
         # R_hidro: combina ANA (rios) + CEMADEN (alertas hidrologicos).
         # Pega o maior score entre as duas fontes. CEMADEN cobre muito mais
         # municipios (~26 vs 8 da ANA) e inclui alagamento/enxurrada/inundacao.
-        river_alert = river_data.get(mun_name)
+        river_alert = river_data.get(ibge_code)
         has_station = river_alert is not None
-        if not has_station:
-            for river_mun, alert in river_data.items():
-                matched_ibge = match_name_to_ibge(river_mun, name_lookup)
-                if matched_ibge == ibge_code:
-                    river_alert = alert
-                    has_station = True
-                    break
         r_hidro_ana, _ = calc_r_hidro(river_alert or "normal", has_station=has_station)
 
         cemaden_score = cemaden_hydro.get(ibge_code, 0)
@@ -675,6 +767,12 @@ def main():
             "data_coverage": data_coverage,
             "max_domain_score": max_domain_score,
             "dominant_domain": dominant_domain,
+            "has_clima": r_clima_has,
+            "has_saude": r_saude_has,
+            "has_ambiente": r_ambiente_has,
+            "has_hidro": r_hidro_has,
+            "has_ar": r_ar_has,
+            "versao_metodo": VERSAO_METODO,
             "calculated_at": now,
         })
 

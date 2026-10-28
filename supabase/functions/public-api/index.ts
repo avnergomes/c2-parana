@@ -204,10 +204,17 @@ async function handleAlertas(supabase: SupabaseClient, url: URL) {
   return { status: 200, body: data || [], meta: { count: data?.length || 0 } }
 }
 
+// Contrato da /v1/irtc congelado nas colunas que ele sempre devolveu: colunas
+// novas de irtc_scores (has_*, versao_metodo na migration 054) nao entram na
+// resposta de quem ja integrou.
+const IRTC_V1_COLUNAS =
+  'id, ibge_code, municipality, irtc_score, risk_clima, risk_saude, risk_ambiente, risk_hidro, ' +
+  'risk_ar, risk_level, calculated_at, data_coverage, max_domain_score, dominant_domain'
+
 async function handleIrtc(supabase: SupabaseClient, ibge: string) {
   const { data, error: e } = await supabase
     .from('irtc_scores')
-    .select('*')
+    .select(IRTC_V1_COLUNAS)
     .eq('ibge_code', ibge)
     .maybeSingle()
   if (e) return { status: 500, body: { error: e.message } }

@@ -27,6 +27,11 @@ jobs:
       - name: Unit tests
         run: npx vitest run --reporter=verbose
 
+      - name: Edge Functions tests (Deno)
+        env:
+          DENO_NO_PACKAGE_JSON: '1'
+        run: npx -y deno test --allow-read supabase/functions/
+
       - name: Build check
         env:
           VITE_SUPABASE_URL: https://placeholder.supabase.co

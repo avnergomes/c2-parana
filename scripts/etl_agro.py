@@ -166,14 +166,14 @@ def get_vbp_fallback():
     vbp_municipios = [
         {"ibge_code": "4104808", "nome": "Cascavel", "vbp_total": 4_500_000_000},
         {"ibge_code": "4127700", "nome": "Toledo", "vbp_total": 4_200_000_000},
-        {"ibge_code": "4104402", "nome": "Campo Mourão", "vbp_total": 3_800_000_000},
+        {"ibge_code": "4104303", "nome": "Campo Mourão", "vbp_total": 3_800_000_000},
         {"ibge_code": "4113700", "nome": "Londrina", "vbp_total": 3_500_000_000},
         {"ibge_code": "4115200", "nome": "Maringá", "vbp_total": 3_200_000_000},
         {"ibge_code": "4119905", "nome": "Ponta Grossa", "vbp_total": 2_900_000_000},
         {"ibge_code": "4109401", "nome": "Guarapuava", "vbp_total": 2_700_000_000},
         {"ibge_code": "4128104", "nome": "Umuarama", "vbp_total": 2_500_000_000},
-        {"ibge_code": "4118501", "nome": "Paranavaí", "vbp_total": 2_300_000_000},
-        {"ibge_code": "4101804", "nome": "Assis Chateaubriand", "vbp_total": 2_100_000_000},
+        {"ibge_code": "4118402", "nome": "Paranavaí", "vbp_total": 2_300_000_000},
+        {"ibge_code": "4102000", "nome": "Assis Chateaubriand", "vbp_total": 2_100_000_000},
     ]
 
     return vbp_kpis, vbp_municipios
@@ -396,14 +396,14 @@ def get_credito_fallback():
     municipios = [
         {"ibge_code": "4104808", "municipio": "Cascavel", "valor_total": 1_800_000_000, "num_contratos": 4500},
         {"ibge_code": "4127700", "municipio": "Toledo", "valor_total": 1_600_000_000, "num_contratos": 4200},
-        {"ibge_code": "4104402", "municipio": "Campo Mourão", "valor_total": 1_400_000_000, "num_contratos": 3800},
+        {"ibge_code": "4104303", "municipio": "Campo Mourão", "valor_total": 1_400_000_000, "num_contratos": 3800},
         {"ibge_code": "4113700", "municipio": "Londrina", "valor_total": 1_200_000_000, "num_contratos": 3500},
         {"ibge_code": "4115200", "municipio": "Maringá", "valor_total": 1_100_000_000, "num_contratos": 3200},
         {"ibge_code": "4119905", "municipio": "Ponta Grossa", "valor_total": 950_000_000, "num_contratos": 2900},
         {"ibge_code": "4109401", "municipio": "Guarapuava", "valor_total": 850_000_000, "num_contratos": 2700},
         {"ibge_code": "4128104", "municipio": "Umuarama", "valor_total": 780_000_000, "num_contratos": 2500},
-        {"ibge_code": "4118501", "municipio": "Paranavaí", "valor_total": 720_000_000, "num_contratos": 2300},
-        {"ibge_code": "4101804", "municipio": "Assis Chateaubriand", "valor_total": 680_000_000, "num_contratos": 2100},
+        {"ibge_code": "4118402", "municipio": "Paranavaí", "valor_total": 720_000_000, "num_contratos": 2300},
+        {"ibge_code": "4102000", "municipio": "Assis Chateaubriand", "valor_total": 680_000_000, "num_contratos": 2100},
     ]
     return kpis, municipios
 
