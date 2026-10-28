@@ -12,6 +12,7 @@
 // linhas do PostgREST -- mesma janela efetiva de dados nos dois runtimes.
 
 import { runEtl, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
+import { leituraRioValida } from '../_shared/frescor.ts'
 
 const round1 = (v: number) => Math.round(v * 10) / 10
 
@@ -135,13 +136,15 @@ async function fetchFireSummary(client: SupabaseClient): Promise<Record<string, 
   return { total_spots: rows.length, affected_municipalities: munis.size }
 }
 
+/** Estacao sem nivel medido ha ate 12 h conta como 'sem_leitura', nao pelo alerta velho. */
 async function fetchRiverSummary(client: SupabaseClient): Promise<Record<string, unknown>> {
-  const { data, error } = await client.from('river_levels').select('municipality,alert_level')
+  const { data, error } = await client.from('river_levels').select('municipality,alert_level,level_cm,observed_at')
   if (error) throw new Error(`river_levels: ${error.message}`)
-  const rows = (data ?? []) as { alert_level: string | null }[]
+  const rows = (data ?? []) as { alert_level: string | null; level_cm: number | null; observed_at: string | null }[]
+  const agora = new Date()
   const byLevel: Record<string, number> = {}
   for (const r of rows) {
-    const level = r.alert_level ?? 'normal'
+    const level = leituraRioValida(r, agora) ? (r.alert_level ?? 'normal') : 'sem_leitura'
     byLevel[level] = (byLevel[level] ?? 0) + 1
   }
   return { total_stations: rows.length, by_level: byLevel }

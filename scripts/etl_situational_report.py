@@ -20,6 +20,8 @@ from datetime import datetime, timezone, timedelta
 import requests
 from dotenv import load_dotenv
 
+from frescor import agora_utc, leitura_rio_valida
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 load_dotenv()
@@ -156,11 +158,13 @@ def fetch_fire_summary():
 
 
 def fetch_river_summary():
-    """Status dos rios monitorados."""
-    rows = postgrest_get("river_levels", "municipality,alert_level")
+    """Status dos rios monitorados. Estacao sem nivel medido ha ate 12 h conta
+    como 'sem_leitura', nao pelo alerta velho."""
+    rows = postgrest_get("river_levels", "municipality,alert_level,level_cm,observed_at")
+    agora = agora_utc()
     by_level = {}
     for r in rows:
-        level = r.get("alert_level", "normal")
+        level = (r.get("alert_level") or "normal") if leitura_rio_valida(r, agora) else "sem_leitura"
         by_level[level] = by_level.get(level, 0) + 1
     return {"total_stations": len(rows), "by_level": by_level}
 

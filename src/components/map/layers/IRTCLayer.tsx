@@ -16,9 +16,9 @@ function getName(feature: Feature | undefined): string {
 }
 
 function getRiskLabel(irtc: number): string {
-  if (irtc <= 25) return 'Baixo'
-  if (irtc <= 50) return 'Médio'
-  if (irtc <= 75) return 'Alto'
+  if (irtc < 25) return 'Baixo'
+  if (irtc < 50) return 'Médio'
+  if (irtc < 75) return 'Alto'
   return 'Crítico'
 }
 

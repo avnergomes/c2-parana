@@ -51,7 +51,8 @@ supabase/
   functions/        Edge Functions:
                       create-checkout, create-portal, stripe-webhook, public-api
                       _shared/ (etl.ts, pr_municipios.ts, pr_geometria.ts,
-                               pr_geo.ts — ponto-no-poligono dos focos FIRMS)
+                               pr_geo.ts — ponto-no-poligono dos focos FIRMS,
+                               frescor.ts — idade maxima das leituras)
                       18 ETLs: aviacao, clima, escalation, alerts, cemaden,
                       correlations, noticias, anomalies, irtc, dengue,
                       situational, agua, ambiente, healthcare, legislativo,

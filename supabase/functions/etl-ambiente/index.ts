@@ -18,15 +18,16 @@
 // - AQICN: 12 cidades por slug + fallback geo:lat;lon; upsert por city com
 //   fallback delete+insert.
 // - ANA: 8 estacoes fluviometricas, XML parseado por extracao de blocos
-//   <DadosHidrometereologicos> (regex por tag, mesmo casamento por
-//   substring de tag do Python); cotas de alerta por estacao. Estacao sem
-//   leitura valida NAO e gravada: a ultima leitura real fica com a sua data
-//   (o IRTC so usa leitura de ate 12 h). Antes a falha virava um registro
-//   'normal' com observed_at = agora.
+//   <DadosHidrometereologicos> (ana.ts; mesmo casamento por substring de
+//   tag do Python); vale o bloco de maior DataHora com nivel numerico, nao
+//   o ultimo do arquivo. Cotas de alerta por estacao. Estacao sem leitura
+//   valida NAO e gravada: a ultima leitura real fica com a sua data (IRTC,
+//   alertas, correlacoes e relatorio so usam leitura de ate 12 h). Antes a
+//   falha virava um registro 'normal' com observed_at = agora.
 
 import { runEtl, sleep, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
 import { municipioDoPonto } from '../_shared/pr_geo.ts'
-import { dataHoraAnaIso } from './ana.ts'
+import { leituraMaisRecente, parseAnaXml } from './ana.ts'
 
 // oeste,sul,leste,norte. O PR vai de -54,62 a -48,02 de longitude e de
 // -26,72 a -22,52 de latitude; a folga cobre a fronteira inteira.
@@ -147,19 +148,12 @@ function parseCsv(text: string): Record<string, string>[] {
 
 async function fetchFirms(firmsKey: string): Promise<{ spots: FireSpot[]; foraDoPr: number }> {
   const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${firmsKey}/VIIRS_SNPP_NRT/${PR_BBOX}/5`
+  // Falha da fonte lanca (o run fica 'partial') em vez de parecer "zero
+  // focos": o IRTC le zero foco como dado valido de risco ambiental nulo.
   const resp = await requestWithRetry(url, { maxRetries: 3, timeoutMs: 60_000 })
-  if (resp === null) {
-    console.warn('FIRMS: falha de conexao apos retries')
-    return { spots: [], foraDoPr: 0 }
-  }
-  if (resp.status === 403 || resp.status === 429) {
-    console.warn(`FIRMS: HTTP ${resp.status} - limite de API atingido`)
-    return { spots: [], foraDoPr: 0 }
-  }
-  if (!resp.ok) {
-    console.warn(`FIRMS: HTTP ${resp.status}`)
-    return { spots: [], foraDoPr: 0 }
-  }
+  if (resp === null) throw new Error('falha de conexao apos retries')
+  if (resp.status === 403 || resp.status === 429) throw new Error(`HTTP ${resp.status} - limite de API atingido`)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
   const text = await resp.text()
   const spots: FireSpot[] = []
   let foraDoPr = 0
@@ -366,30 +360,6 @@ function getAlertLevel(stationCode: string, levelCm: number | null): string {
   return 'normal'
 }
 
-/**
- * Extrai os blocos DadosHidrometereologicos do XML da ANA e devolve, do
- * ULTIMO bloco, nivel/vazao/datahora pelo mesmo casamento por substring de
- * tag do Python ('nivel' | 'vazao' | 'datahora' ou 'data').
- */
-function parseAnaXml(xml: string): { nivel: string | null; vazao: string | null; dataHora: string | null } | null {
-  if (!xml.trimStart().startsWith('<')) return null
-  const blocks = [...xml.matchAll(/<DadosHidrometereologicos[\s>][\s\S]*?<\/DadosHidrometereologicos>/gi)]
-  if (blocks.length === 0) return null
-  const last = blocks[blocks.length - 1][0]
-
-  let nivel: string | null = null
-  let vazao: string | null = null
-  let dataHora: string | null = null
-  for (const m of last.matchAll(/<([\w:]+)[^>]*>([^<]*)<\/\1>/g)) {
-    const tagLower = m[1].toLowerCase().split(':').pop() ?? ''
-    const text = m[2]
-    if (tagLower.includes('nivel')) nivel = text
-    else if (tagLower.includes('vazao')) vazao = text
-    else if (tagLower.includes('datahora') || tagLower.includes('data')) dataHora = text
-  }
-  return { nivel, vazao, dataHora }
-}
-
 async function fetchAnaRivers(): Promise<RiverRecord[]> {
   const records: RiverRecord[] = []
   const ddmmyyyy = (d: Date) => {
@@ -422,25 +392,22 @@ async function fetchAnaRivers(): Promise<RiverRecord[]> {
         console.warn(`ANA ${est.code}: ${resp === null ? 'sem conexao' : `HTTP ${resp.status}`} (mantida a ultima leitura)`)
         continue
       }
-      const parsed = parseAnaXml(await resp.text())
-      if (parsed === null) {
+      const blocos = parseAnaXml(await resp.text())
+      if (blocos === null) {
         console.warn(`ANA ${est.code}: XML sem dados (mantida a ultima leitura)`)
         continue
       }
-      const levelRaw = parsed.nivel && parsed.nivel.trim() ? Number(parsed.nivel) : null
-      const levelCm = Number.isFinite(levelRaw as number) ? levelRaw : null
-      const observedAt = dataHoraAnaIso(parsed.dataHora)
-      if (levelCm === null || observedAt === null) {
-        console.warn(`ANA ${est.code}: leitura sem nivel ou sem data (mantida a ultima leitura)`)
+      const leitura = leituraMaisRecente(blocos)
+      if (leitura === null) {
+        console.warn(`ANA ${est.code}: nenhum bloco com nivel e data (mantida a ultima leitura)`)
         continue
       }
-      const flow = parsed.vazao && parsed.vazao.trim() ? Number(parsed.vazao) : null
       records.push({
         ...base,
-        level_cm: levelCm,
-        flow_m3s: Number.isFinite(flow as number) ? flow : null,
-        alert_level: getAlertLevel(est.code, levelCm),
-        observed_at: observedAt,
+        level_cm: leitura.levelCm,
+        flow_m3s: leitura.flowM3s,
+        alert_level: getAlertLevel(est.code, leitura.levelCm),
+        observed_at: leitura.observedAt,
       })
     } catch (e) {
       console.warn(`ANA ${est.code}: ${(e as Error).message} (mantida a ultima leitura)`)
@@ -495,10 +462,14 @@ Deno.serve((req: Request) =>
         const { error: delError } = await client.from('fire_spots').delete().lt('acq_date', cutoff)
         if (delError) console.warn(`limpeza fire_spots: ${delError.message}`)
       }
+    } catch (e) {
+      errors.push(`FIRMS: ${(e as Error).message}`)
+    }
+    try {
       backfill = await backfillFireSpots(client)
       if (backfill.erros > 0) errors.push(`FIRMS backfill: ${backfill.erros} erro(s)`)
     } catch (e) {
-      errors.push(`FIRMS: ${(e as Error).message}`)
+      errors.push(`FIRMS backfill: ${(e as Error).message}`)
     }
 
     // 2/3 AQICN

@@ -27,6 +27,7 @@
 import { runEtl, batchUpsert, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
 import { PR_MUNICIPIOS, buildNameLookup, stripAccentsLower } from '../_shared/pr_municipios.ts'
 import {
+  AR_MAX_IDADE_H,
   CLIMA_MAX_IDADE_H,
   RIO_MAX_IDADE_H,
   VERSAO_METODO,
@@ -261,12 +262,15 @@ async function fetchCemadenHydroScores(client: SupabaseClient, agora: Date): Pro
   return byIbge
 }
 
-async function fetchAirQuality(client: SupabaseClient): Promise<Map<string, number>> {
-  const { data, error } = await client.from('air_quality').select('city,aqi')
+/** AQI por cidade, so de leitura com ate AR_MAX_IDADE_H horas. */
+async function fetchAirQuality(client: SupabaseClient, agora: Date): Promise<Map<string, number>> {
+  const { data, error } = await client.from('air_quality').select('city,aqi,observed_at')
   if (error) throw new Error(`air_quality: ${error.message}`)
   const byCity = new Map<string, number>()
-  for (const rec of (data ?? []) as { city: string | null; aqi: number | null }[]) {
-    if (rec.city && rec.aqi !== null && rec.aqi !== undefined) byCity.set(rec.city, rec.aqi)
+  for (const rec of (data ?? []) as { city: string | null; aqi: number | null; observed_at: string | null }[]) {
+    if (!rec.city || rec.aqi === null || rec.aqi === undefined) continue
+    if (!leituraFresca(rec.observed_at, agora, AR_MAX_IDADE_H)) continue
+    byCity.set(rec.city, rec.aqi)
   }
   return byCity
 }
@@ -312,7 +316,7 @@ Deno.serve((req: Request) =>
 
     let airData = new Map<string, number>()
     try {
-      airData = await fetchAirQuality(client)
+      airData = await fetchAirQuality(client, agora)
     } catch (e) {
       errors.push(`air_quality: ${(e as Error).message}`)
     }

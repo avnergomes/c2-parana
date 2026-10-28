@@ -25,6 +25,7 @@
 //     como "ja existe" funciona corretamente com o indice parcial.
 
 import { pooledMap, runEtl, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
+import { RIO_MAX_IDADE_H } from '../_shared/frescor.ts'
 
 const DOMAIN_TO_INCIDENT_TYPE: Record<string, string> = {
   clima: 'onda_calor',
@@ -158,10 +159,16 @@ async function fetchDomainData(client: SupabaseClient, domain: string): Promise<
     case 'ambiente':
       return await fetchAmbiente(client)
     case 'hidro':
+      // So estacao com nivel medido ha ate RIO_MAX_IDADE_H: uma cota de
+      // emergencia de dias atras nao e mais o estado do rio.
       return await selectAll(
         client,
         'river_levels',
         'station_code,station_name,river_name,municipality,level_cm,flow_m3s,alert_level,observed_at',
+        (q) =>
+          q
+            .not('level_cm', 'is', null)
+            .gte('observed_at', new Date(Date.now() - RIO_MAX_IDADE_H * 3_600_000).toISOString()),
       )
     case 'ar':
       return await selectAll(

@@ -24,6 +24,7 @@ em supabase/functions/etl-irtc):
 
 import os
 import json
+import math
 import sys
 import time
 import requests
@@ -32,6 +33,16 @@ from dotenv import load_dotenv
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from collections import defaultdict
+
+# Idade maxima das leituras, compartilhada com os consumidores de river_levels
+from frescor import (
+    AR_MAX_IDADE_H,
+    CLIMA_MAX_IDADE_H,
+    DENGUE_MAX_IDADE_DIAS,
+    RIO_MAX_IDADE_H,
+    agora_utc,
+    leitura_fresca,
+)
 
 load_dotenv()
 
@@ -60,14 +71,35 @@ W_AR = 0.15
 
 # Versao do metodo gravada em irtc_scores.versao_metodo
 VERSAO_METODO = "v1.1"
-
-# Leitura mais velha que isso nao conta como dado do dominio
-CLIMA_MAX_IDADE_H = 36
-RIO_MAX_IDADE_H = 12
-DENGUE_MAX_IDADE_DIAS = 28
+# Colunas da migration 054 (ver postgrest_upsert)
+COLUNAS_V1_1 = ("has_clima", "has_saude", "has_ambiente", "has_hidro", "has_ar", "versao_metodo")
 
 PAGINA = 1000
 MAX_PAGINAS = 50
+
+
+def js_round(x):
+    """Math.round do JavaScript: meio vai para +infinito. O round() do Python
+    arredonda meio para o par (40.625 -> 40.62; no Deno, 40.63)."""
+    r = math.floor(x)
+    return r + 1 if x - r >= 0.5 else r
+
+
+def round1(v):
+    return js_round(v * 10) / 10
+
+
+def round2(v):
+    return js_round(v * 100) / 100
+
+
+def soma(valores):
+    """Soma da esquerda para a direita, como o reduce do Deno (o sum() do
+    Python 3.12+ compensa o erro de arredondamento e pode diferir no ultimo bit)."""
+    total = 0.0
+    for v in valores:
+        total += v
+    return total
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────
@@ -108,26 +140,6 @@ def postgrest_get_all(table, select, params=None, order="id"):
     return linhas
 
 
-def agora_utc():
-    return datetime.now(timezone.utc)
-
-
-def _parse_ts(valor):
-    if not valor:
-        return None
-    try:
-        t = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
-
-
-def leitura_fresca(observed_at, agora, max_horas):
-    """Leitura com timestamp de ate `max_horas` horas atras."""
-    t = _parse_ts(observed_at)
-    return t is not None and (agora - t) <= timedelta(hours=max_horas)
-
-
 def inicio_semana_epi(ano, semana):
     """Inicio (domingo) da semana epidemiologica do SINAN: a semana 1 e a que
     contem o dia 4 de janeiro, contada de domingo a sabado."""
@@ -148,7 +160,7 @@ def semana_epi_fresca(ano, semana, agora, max_dias=DENGUE_MAX_IDADE_DIAS):
     return (agora - fim) <= timedelta(days=max_dias)
 
 
-def postgrest_upsert(table, records, on_conflict="ibge_code"):
+def postgrest_upsert(table, records, on_conflict="ibge_code", colunas_novas=()):
     """Faz POST (upsert) na API PostgREST do Supabase.
 
     O parametro on_conflict e passado via query string (?on_conflict=<coluna>)
@@ -156,6 +168,9 @@ def postgrest_upsert(table, records, on_conflict="ibge_code"):
     contra a primary key. Para tabelas cuja chave logica (cache_key, ibge_code)
     e um UNIQUE constraint separado da PK, o conflict target precisa ser
     explicito. Sem ele, o PostgREST tenta INSERT puro e viola a constraint.
+
+    `colunas_novas`: colunas de uma migration que pode ainda nao ter sido
+    aplicada (PGRST204); o lote e regravado sem elas em vez de perder o run.
     """
     if not records:
         return True
@@ -167,6 +182,11 @@ def postgrest_upsert(table, records, on_conflict="ibge_code"):
         if on_conflict:
             url += f"?on_conflict={on_conflict}"
         resp = requests.post(url, headers=upsert_headers, json=batch, timeout=30)
+        if resp.status_code == 400 and "PGRST204" in resp.text and colunas_novas:
+            print(f"  WARN upsert {table}: coluna nova ausente, regravando sem {', '.join(colunas_novas)} "
+                  "(aplicar a migration 054)")
+            batch = [{k: v for k, v in r.items() if k not in colunas_novas} for r in batch]
+            resp = requests.post(url, headers=upsert_headers, json=batch, timeout=30)
         if resp.status_code not in (200, 201):
             print(f"  ERRO upsert {table} lote {i}: HTTP {resp.status_code} - {resp.text[:300]}")
             return False
@@ -243,7 +263,7 @@ def fetch_climate_data(agora):
             by_municipality[ibge] = {
                 "temperature": None, "humidity": None, "precipitation_72h": 0.0,
             }
-        by_municipality[ibge]["precipitation_72h"] = round(total, 1)
+        by_municipality[ibge]["precipitation_72h"] = round1(total)
 
     precip_nonzero = sum(1 for v in by_municipality.values() if v["precipitation_72h"] > 0)
     print(
@@ -390,18 +410,21 @@ def fetch_cemaden_hydro_scores(agora):
     return by_ibge
 
 
-def fetch_air_quality():
-    """Busca qualidade do ar por cidade."""
+def fetch_air_quality(agora):
+    """AQI por cidade, so de leitura com ate AR_MAX_IDADE_H horas."""
     records = postgrest_get(
         "air_quality",
-        select="city,aqi",
+        select="city,aqi,observed_at",
     )
     by_city = {}
     for rec in records:
         city = rec.get("city")
         aqi = rec.get("aqi")
-        if city and aqi is not None:
-            by_city[city] = aqi
+        if not city or aqi is None:
+            continue
+        if not leitura_fresca(rec.get("observed_at"), agora, AR_MAX_IDADE_H):
+            continue
+        by_city[city] = aqi
     print(f"  Ar: {len(by_city)} cidades com dados")
     return by_city
 
@@ -665,7 +688,7 @@ def main():
 
     print("\n6/6 Buscando qualidade do ar...")
     try:
-        air_data = fetch_air_quality()
+        air_data = fetch_air_quality(agora)
     except Exception as e:
         print(f"  ERRO ar: {e}")
         air_data = {}
@@ -734,9 +757,9 @@ def main():
 
         available = [(w, s, name) for w, s, has, name in domains if has]
         if available:
-            total_weight = sum(w for w, s, n in available)
-            irtc = round(sum(w * s for w, s, n in available) / total_weight, 2)
-            data_coverage = round(total_weight, 2)
+            total_weight = soma(w for w, s, n in available)
+            irtc = round2(soma(w * s for w, s, n in available) / total_weight)
+            data_coverage = round2(total_weight)
         else:
             irtc = 0.0
             data_coverage = 0.0
@@ -757,11 +780,11 @@ def main():
         irtc_records.append({
             "ibge_code": ibge_code,
             "municipality": mun_name,
-            "risk_clima": round(r_clima, 2),
-            "risk_saude": round(r_saude, 2),
-            "risk_ambiente": round(r_ambiente, 2),
-            "risk_hidro": round(r_hidro, 2),
-            "risk_ar": round(r_ar, 2),
+            "risk_clima": round2(r_clima),
+            "risk_saude": round2(r_saude),
+            "risk_ambiente": round2(r_ambiente),
+            "risk_hidro": round2(r_hidro),
+            "risk_ar": round2(r_ar),
             "irtc_score": irtc,
             "risk_level": risk_level,
             "data_coverage": data_coverage,
@@ -780,7 +803,9 @@ def main():
 
     # 4. Upsert no Supabase
     print("\nUpsert irtc_scores no Supabase...")
-    upsert_ok = postgrest_upsert("irtc_scores", irtc_records, on_conflict="ibge_code")
+    upsert_ok = postgrest_upsert(
+        "irtc_scores", irtc_records, on_conflict="ibge_code", colunas_novas=COLUNAS_V1_1,
+    )
     if upsert_ok:
         print(f"  {len(irtc_records)} registros upserted com sucesso")
     else:

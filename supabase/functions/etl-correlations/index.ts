@@ -18,6 +18,7 @@
 // criava incidente. O INSERT + 23505 realiza a dedup que o indice ja garante.
 
 import { runEtl, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
+import { leituraRioValida } from '../_shared/frescor.ts'
 import { PR_MUNICIPIOS, buildNameLookup, stripAccentsLower } from '../_shared/pr_municipios.ts'
 
 interface Rule {
@@ -126,15 +127,21 @@ async function fetchRiverAlerts(
   client: SupabaseClient,
   lookup: Map<string, string>,
 ): Promise<Map<string, string>> {
-  const { data, error } = await client.from('river_levels').select('municipality,alert_level')
+  const { data, error } = await client.from('river_levels').select('municipality,alert_level,level_cm,observed_at')
   if (error) {
     console.warn(`river_levels: ${error.message}`)
     return new Map()
   }
+  const agora = new Date()
   const priority: Record<string, number> = { normal: 0, attention: 1, alert: 2, emergency: 3 }
   const byIbge = new Map<string, string>()
-  for (const r of (data ?? []) as { municipality: string | null; alert_level: string | null }[]) {
-    if (!r.municipality) continue
+  for (const r of (data ?? []) as {
+    municipality: string | null
+    alert_level: string | null
+    level_cm: number | null
+    observed_at: string | null
+  }[]) {
+    if (!r.municipality || !leituraRioValida(r, agora)) continue
     const level = r.alert_level ?? 'normal'
     const ibge = matchNameToIbge(r.municipality, lookup)
     if (!ibge) continue

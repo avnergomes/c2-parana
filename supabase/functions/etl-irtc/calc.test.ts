@@ -15,6 +15,7 @@ import {
   semanaEpiFresca,
   type DominioAvaliado,
 } from './calc.ts'
+import { leituraRioValida } from '../_shared/frescor.ts'
 
 const dom = (nome: DominioAvaliado['nome'], score: number, temDado: boolean): DominioAvaliado => ({
   nome,
@@ -84,4 +85,16 @@ Deno.test('leitura fresca respeita a janela', () => {
   assert(leituraFresca('2026-10-28T08:30:00-03:00', agora, 12))
   assert(!leituraFresca(null, agora, 12))
   assert(!leituraFresca('lixo', agora, 12))
+})
+
+Deno.test('arredondamento de meio vai para cima (o Python espelha o Math.round)', () => {
+  const r = combinarDominios([{ peso: W_CLIMA, score: 40.625, temDado: true, nome: 'clima' }])
+  assertEquals(r.irtc, 40.63) // round(40.625, 2) do Python dava 40.62
+})
+
+Deno.test('leitura de rio so vale com nivel e ate 12 h', () => {
+  const agora = new Date('2026-10-28T12:00:00Z')
+  assert(leituraRioValida({ level_cm: 310, observed_at: '2026-10-28T06:00:00-03:00' }, agora))
+  assert(!leituraRioValida({ level_cm: null, observed_at: '2026-10-28T06:00:00-03:00' }, agora))
+  assert(!leituraRioValida({ level_cm: 310, observed_at: '2026-10-27T20:00:00-03:00' }, agora))
 })

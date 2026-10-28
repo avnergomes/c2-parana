@@ -18,24 +18,43 @@
 >   ponto-no-polígono (`_shared/pr_geo.ts` + `pr_geometria.ts`, gerado por
 >   `scripts/gen_pr_geometria.py`; espelho `scripts/pr_geo.py`), com
 >   `ibge_code` gravado, foco fora do PR descartado e reclassificação dos
->   focos antigos a cada run. `_shared/pr_centroids.ts` removido.
-> - **ANA:** falha virava registro `normal` com `observed_at = agora` e
->   contava como dado no hidro. Agora a estação sem leitura válida não é
->   gravada, e a data da ANA ganha o fuso de Brasília.
+>   focos antigos a cada run. Tolerância de 0,5 km só na divisa estadual (as
+>   divisas internas da malha não têm fresta); empate fica com o menor
+>   código IBGE nos dois runtimes. Falha do FIRMS deixa o run `partial` em
+>   vez de parecer “zero focos”. `_shared/pr_centroids.ts` removido.
+> - **ANA:** o ETL pegava o último bloco do XML, não a leitura mais recente;
+>   agora vale o bloco de maior DataHora com nível numérico (`ana.ts`). Falha
+>   virava registro `normal` com `observed_at = agora` e contava como dado
+>   no hidro; agora a estação sem leitura válida não é gravada, e a data da
+>   ANA ganha o fuso de Brasília.
+> - **Leitura velha (`_shared/frescor.ts` + `scripts/frescor.py`):** rio só
+>   com nível de até 12 h no IRTC, nas regras de alerta `hidro`, nas
+>   correlações e no relatório situacional (estação parada conta como
+>   `sem_leitura`); qualidade do ar de até 36 h no IRTC.
 > - **IRTC (`etl-irtc` v1.1 + `etl_irtc.py`):** focos por `ibge_code` com
->   paginação (o teto de 1000 linhas truncava a contagem); rio só com
->   leitura de até 12 h; dengue só com semana de até 28 dias; clima de até
->   36 h; classe pelo corte “>= limite”, igual aos painéis; `has_*` por
->   domínio e `versao_metodo` gravados (migration **054**). Regras puras em
->   `etl-irtc/calc.ts`. `public-api` `/v1/irtc` com colunas congeladas.
+>   paginação (o teto de 1000 linhas truncava a contagem); dengue só com
+>   semana de até 28 dias; clima de até 36 h; classe pelo corte
+>   “>= limite”; `has_*` por domínio e `versao_metodo` gravados (migration
+>   **054**). Regras puras em `etl-irtc/calc.ts`. O Python arredonda e soma
+>   como o Deno (40,625 → 40,63 nos dois). `public-api` `/v1/irtc` com
+>   colunas congeladas.
+> - **Corte 75 em todo lugar:** cor e rótulo do mapa e anel do painel COP
+>   passaram de “<= 75 = alto” para “< 75”; a 054 muda a regra
+>   “IRTC Crítico” de `> 75` para `>= 75`.
 > - **Testes Deno** (`npx deno test --allow-read supabase/functions/`):
 >   listas IBGE de todos os ETLs conferidas contra `pr_municipios`,
->   ponto-no-polígono e regras do IRTC; passo novo no `ci.yml`.
-> - **ORDEM DE DEPLOY:** `db push` da 054 → deploy de `etl-ambiente`,
->   `etl-irtc`, `etl-saude`, `etl-clima`, `etl-agro` e `public-api`. Os
->   workflows Python das Fases 2-4 seguem com `schedule` (cutover pendente);
->   como Python e Deno foram corrigidos igual, o dual-run grava o mesmo
->   resultado.
+>   ponto-no-polígono (divisa, vizinhos, empates), parser da ANA e regras
+>   do IRTC; passo novo no `ci.yml`.
+> - **ORDEM DE DEPLOY:** `supabase db push` (054) → `supabase functions
+>   deploy` de `etl-ambiente`, `etl-irtc`, `etl-saude`, `etl-clima`,
+>   `etl-agro`, `public-api`, `etl-alerts`, `etl-correlations` e
+>   `etl-situational`, na mesma janela, logo depois de um run das :30 do
+>   `etl-irtc`. Os workflows Python das Fases 2-4 seguem com `schedule`
+>   (cutover pendente) e rodam o código novo assim que o merge cai na
+>   `main`; até o deploy das funções, pg_cron e Actions gravam versões
+>   diferentes do IRTC na mesma tabela (vence o último run). O
+>   `etl_irtc.py` regrava sem as colunas da 054 se ela ainda não estiver
+>   aplicada.
 
 **Última atualização anterior:** 2026-08-25
 

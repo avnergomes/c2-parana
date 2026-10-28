@@ -10,13 +10,14 @@ e gravada: a ultima leitura real fica com a sua data.
 
 import os
 import io
+import math
 import re
 import csv
 import json
 import time
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client
 from dotenv import load_dotenv
 
@@ -131,53 +132,49 @@ def fetch_firms():
     UNIQUE constraint deduplica re-inserts.
     """
     url = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_KEY}/VIIRS_SNPP_NRT/{PR_BBOX}/5"
-    try:
-        resp = request_with_retry(url, method='GET', max_retries=3, timeout=60)
+    resp = request_with_retry(url, method='GET', max_retries=3, timeout=60)
 
-        if resp is None:
-            print(f"  Falha ao conectar FIRMS após retries")
-            return []
+    # Falha da fonte levanta (o run fica 'partial') em vez de parecer "zero
+    # focos": o IRTC le zero foco como dado valido de risco ambiental nulo.
+    if resp is None:
+        raise RuntimeError("falha de conexao apos retries")
 
-        if resp.status_code in (403, 429):
-            print(f"  FIRMS retornou {resp.status_code} - limite de API atingido")
-            if NASA_FIRMS_KEY == "DEMO_KEY":
-                print("  Configure NASA_FIRMS_KEY em GitHub Secrets!")
-            return []
+    if resp.status_code in (403, 429):
+        if NASA_FIRMS_KEY == "DEMO_KEY":
+            print("  Configure NASA_FIRMS_KEY em GitHub Secrets!")
+        raise RuntimeError(f"HTTP {resp.status_code} - limite de API atingido")
 
-        resp.raise_for_status()
+    resp.raise_for_status()
 
-        reader = csv.DictReader(io.StringIO(resp.text))
-        spots = []
-        fora_do_pr = 0
-        for row in reader:
-            try:
-                lat = float(row.get("latitude", 0))
-                lon = float(row.get("longitude", 0))
-                municipio = municipio_do_ponto(lat, lon)
-                if municipio is None:
-                    fora_do_pr += 1
-                    continue
-                spots.append({
-                    "latitude": lat,
-                    "longitude": lon,
-                    "municipality": municipio["nome"],
-                    "ibge_code": municipio["ibge"],
-                    "brightness": float(row.get("bright_ti4", 0)) if row.get("bright_ti4") else None,
-                    "scan": float(row.get("scan", 0)) if row.get("scan") else None,
-                    "track": float(row.get("track", 0)) if row.get("track") else None,
-                    "acq_date": row.get("acq_date", datetime.now().date().isoformat()),
-                    "acq_time": row.get("acq_time"),
-                    "satellite": row.get("satellite"),
-                    "instrument": "VIIRS",
-                    "confidence": row.get("confidence"),
-                })
-            except:
+    reader = csv.DictReader(io.StringIO(resp.text))
+    spots = []
+    fora_do_pr = 0
+    for row in reader:
+        try:
+            lat = float(row.get("latitude", 0))
+            lon = float(row.get("longitude", 0))
+            municipio = municipio_do_ponto(lat, lon)
+            if municipio is None:
+                fora_do_pr += 1
                 continue
-        print(f"FIRMS: {len(spots)} focos no PR ({fora_do_pr} fora do PR descartados)")
-        return spots
-    except Exception as e:
-        print(f"Erro FIRMS: {e}")
-        return []
+            spots.append({
+                "latitude": lat,
+                "longitude": lon,
+                "municipality": municipio["nome"],
+                "ibge_code": municipio["ibge"],
+                "brightness": float(row.get("bright_ti4", 0)) if row.get("bright_ti4") else None,
+                "scan": float(row.get("scan", 0)) if row.get("scan") else None,
+                "track": float(row.get("track", 0)) if row.get("track") else None,
+                "acq_date": row.get("acq_date", datetime.now().date().isoformat()),
+                "acq_time": row.get("acq_time"),
+                "satellite": row.get("satellite"),
+                "instrument": "VIIRS",
+                "confidence": row.get("confidence"),
+            })
+        except (TypeError, ValueError):
+            continue
+    print(f"FIRMS: {len(spots)} focos no PR ({fora_do_pr} fora do PR descartados)")
+    return spots
 
 def _parse_aqicn_data(city_id, data):
     """Extrai registro de qualidade do ar a partir da resposta WAQI."""
@@ -342,6 +339,50 @@ def data_hora_ana_iso(data_hora):
     return t
 
 
+def _numero_ou_none(texto):
+    if texto is None or not texto.strip():
+        return None
+    try:
+        n = float(texto)
+    except ValueError:
+        return None
+    return n if math.isfinite(n) else None
+
+
+def leitura_mais_recente(dados):
+    """(level_cm, flow_m3s, observed_at) do bloco de maior DataHora entre os
+    que tem nivel numerico e data valida, ou None. A ordem dos blocos no XML
+    nao e garantida; ate 2026-10 o ETL pegava o ultimo bloco, que pode ser a
+    leitura mais velha da janela. Espelho de leituraMaisRecente (ana.ts)."""
+    melhor = None
+    melhor_t = None
+    for bloco in dados:
+        nivel = vazao = data_hora = None
+        for child in bloco:
+            tag_lower = child.tag.lower().split('}')[-1]
+            if 'nivel' in tag_lower:
+                nivel = child.text
+            elif 'vazao' in tag_lower:
+                vazao = child.text
+            elif 'datahora' in tag_lower or 'data' in tag_lower:
+                data_hora = child.text
+        level_cm = _numero_ou_none(nivel)
+        observed_at = data_hora_ana_iso(data_hora)
+        if level_cm is None or observed_at is None:
+            continue
+        try:
+            t = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        if melhor_t is not None and t <= melhor_t:
+            continue
+        melhor_t = t
+        melhor = (level_cm, _numero_ou_none(vazao), observed_at)
+    return melhor
+
+
 def fetch_ana_rivers():
     """Busca dados telemétricos de rios do PR via API SAR/ANA com retry e parsing robusto."""
     records = []
@@ -369,33 +410,15 @@ def fetch_ana_rivers():
                 print(f"  Estação {est['code']}: Parse XML falhou - {err} (mantida a ultima leitura)")
                 continue
 
-            # Pegar último registro (mais recente)
             if not dados:
                 print(f"  Estação {est['code']}: Nenhum dado disponível (mantida a ultima leitura)")
                 continue
 
-            ultimo = dados[-1]
-
-            # Tentar diferentes formatos de tag (com/sem namespace)
-            nivel = None
-            vazao = None
-            data_hora = None
-
-            for child in ultimo:
-                tag_lower = child.tag.lower().split('}')[-1]
-                if 'nivel' in tag_lower:
-                    nivel = child.text
-                elif 'vazao' in tag_lower:
-                    vazao = child.text
-                elif 'datahora' in tag_lower or 'data' in tag_lower:
-                    data_hora = child.text
-
-            level_cm = float(nivel) if nivel and nivel.strip() else None
-            flow_m3s = float(vazao) if vazao and vazao.strip() else None
-            observed_at = data_hora_ana_iso(data_hora)
-            if level_cm is None or observed_at is None:
-                print(f"  Estação {est['code']}: leitura sem nivel ou sem data (mantida a ultima leitura)")
+            leitura = leitura_mais_recente(dados)
+            if leitura is None:
+                print(f"  Estação {est['code']}: nenhum bloco com nivel e data (mantida a ultima leitura)")
                 continue
+            level_cm, flow_m3s, observed_at = leitura
 
             records.append({
                 "station_code": est["code"],
@@ -557,13 +580,17 @@ def main():
                 print(f"  Aviso ao limpar focos antigos: {e}")
         else:
             print("  Nenhum foco encontrado (pode ser periodo sem queimadas)")
+    except Exception as e:
+        print(f"  ERRO FIRMS: {e}")
+        errors.append(f"FIRMS: {e}")
+    try:
         atualizados, apagados, err_bf = _backfill_fire_spots(supabase)
         print(f"  Backfill: {atualizados} focos antigos reclassificados, {apagados} fora do PR apagados")
         if err_bf:
             errors.append(f"FIRMS backfill: {err_bf} erro(s)")
     except Exception as e:
-        print(f"  ERRO FIRMS: {e}")
-        errors.append(f"FIRMS: {e}")
+        print(f"  ERRO backfill FIRMS: {e}")
+        errors.append(f"FIRMS backfill: {e}")
 
     # === AQICN ===
     print("=" * 40)

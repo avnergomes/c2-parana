@@ -171,11 +171,11 @@ export function COPStatusPanel({ onMunicipalityClick: _onMunicipalityClick }: CO
                       r="40"
                       fill="none"
                       stroke={
-                        irtcStats.avg <= 25
+                        irtcStats.avg < 25
                           ? '#10b981'
-                          : irtcStats.avg <= 50
+                          : irtcStats.avg < 50
                             ? '#f59e0b'
-                            : irtcStats.avg <= 75
+                            : irtcStats.avg < 75
                               ? '#f97316'
                               : '#ef4444'
                       }

@@ -6,13 +6,19 @@
 // municipio vizinho e atribuia a municipios paranaenses focos de SP, SC,
 // MS e do Paraguai/Argentina.
 //
-// A malha e simplificada (~19 vertices por municipio), entao vizinhos podem
-// deixar frestas ou se sobrepor por algumas centenas de metros. Por isso:
+// A malha e simplificada (~19 vertices por municipio), mas as divisas
+// internas sao compartilhadas vertice a vertice (sem frestas). Regra:
 //   1. ponto dentro de um poligono -> esse municipio (o primeiro, na ordem
 //      do IBGE, se cair numa sobreposicao);
-//   2. senao, a borda mais proxima a ate `toleranciaKm` (padrao 2 km) ->
-//      esse municipio (frestas da simplificacao e a linha da costa);
+//   2. senao, a borda mais proxima a ate `toleranciaKm` (padrao 0,5 km) ->
+//      esse municipio; empate a menos de 1e-9 km fica com o primeiro na
+//      ordem do IBGE, para Deno e Python nao divergirem no ultimo bit;
 //   3. senao -> null: o ponto esta fora do PR e deve ser descartado.
+// A tolerancia so age na divisa estadual e na costa: recupera ponto
+// paranaense que a simplificacao deixou de fora, ao custo de aceitar ponto
+// vizinho a menos de 0,5 km. Cidades coladas na divisa (Porto Uniao-SC,
+// Barra do Turvo-SP) ficam dentro dessa margem; Mafra-SC, Puerto Iguazu e
+// Bernardo de Irigoyen-AR e Ciudad del Este-PY ficam fora.
 // Mesma regra em scripts/pr_geo.py (a especificacao Python).
 
 import { PR_ANEIS } from './pr_geometria.ts'
@@ -48,6 +54,8 @@ const ANEIS: Anel[] = PR_ANEIS.map(([ibge, nome, coords]) => {
 
 const KM_POR_GRAU_LAT = 110.574
 const KM_POR_GRAU_LON_EQUADOR = 111.32
+export const TOLERANCIA_KM = 0.5
+const EMPATE_KM = 1e-9
 
 /** Ray casting (regra par-impar) sobre um anel lon,lat achatado. */
 export function pontoNoAnel(lon: number, lat: number, coords: readonly number[]): boolean {
@@ -88,7 +96,7 @@ export function distanciaAoAnelKm(lon: number, lat: number, coords: readonly num
 }
 
 /** Municipio do PR que contem o ponto, ou null se ele estiver fora do PR. */
-export function municipioDoPonto(lat: number, lon: number, toleranciaKm = 2): MunicipioPR | null {
+export function municipioDoPonto(lat: number, lon: number, toleranciaKm = TOLERANCIA_KM): MunicipioPR | null {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
   for (const a of ANEIS) {
     if (lon < a.minLon || lon > a.maxLon || lat < a.minLat || lat > a.maxLat) continue
@@ -98,7 +106,7 @@ export function municipioDoPonto(lat: number, lon: number, toleranciaKm = 2): Mu
   const folgaLat = toleranciaKm / KM_POR_GRAU_LAT
   const folgaLon = toleranciaKm / (KM_POR_GRAU_LON_EQUADOR * Math.cos((lat * Math.PI) / 180))
   let melhor: Anel | null = null
-  let melhorKm = toleranciaKm
+  let melhorKm = toleranciaKm + EMPATE_KM
   for (const a of ANEIS) {
     if (
       lon < a.minLon - folgaLon ||
@@ -109,7 +117,7 @@ export function municipioDoPonto(lat: number, lon: number, toleranciaKm = 2): Mu
       continue
     }
     const d = distanciaAoAnelKm(lon, lat, a.coords)
-    if (d <= melhorKm) {
+    if (d < melhorKm - EMPATE_KM) {
       melhorKm = d
       melhor = a
     }

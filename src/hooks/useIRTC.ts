@@ -26,10 +26,11 @@ interface IRTCRawData {
   risk_level: string
 }
 
+/** Mesmo corte do etl-irtc (classifyRiskLevel): 75,00 ja e critico. */
 export function getIRTCColor(score: number): string {
-  if (score <= 25) return '#10b981' // green
-  if (score <= 50) return '#f59e0b' // yellow
-  if (score <= 75) return '#f97316' // orange
+  if (score < 25) return '#10b981' // green
+  if (score < 50) return '#f59e0b' // yellow
+  if (score < 75) return '#f97316' // orange
   return '#ef4444' // red
 }
 

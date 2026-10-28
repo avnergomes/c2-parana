@@ -47,11 +47,24 @@ Deno.test('ponto interior de cada municipio cai nele mesmo', () => {
   assert(erros.length <= 3, `${erros.length} pontos em municipio errado: ${erros.slice(0, 10).join('; ')}`)
 })
 
-Deno.test('fresta da simplificacao: ponto a menos de 2 km da borda ainda e do PR', () => {
-  // Um vertice da borda de Curitiba deslocado ~500 m para fora de todos os aneis.
-  const [, , coords] = PR_ANEIS.find(([ibge]) => ibge === '4106902')!
-  const lon = coords[0]
-  const lat = coords[1]
-  const achado = municipioDoPonto(lat + 0.0045, lon)
-  assert(achado !== null, 'ponto a ~500 m da borda deveria ser atribuido')
+Deno.test('cidades vizinhas a mais de 0,5 km da divisa ficam fora', () => {
+  assertEquals(municipioDoPonto(-26.1115, -49.8053), null) // Mafra-SC (~1,0 km de Rio Negro)
+  assertEquals(municipioDoPonto(-26.255, -53.646), null) // Bernardo de Irigoyen-AR (~0,8 km de Barracao)
+  assertEquals(municipioDoPonto(-25.5975, -54.5786), null) // Puerto Iguazu-AR (~0,7 km de Foz)
+  assertEquals(municipioDoPonto(-25.5097, -54.6111), null) // Ciudad del Este-PY (~1,0 km de Foz)
+})
+
+Deno.test('divisa estadual: 250 m fora ainda e do PR, 1 km fora nao', () => {
+  // Pontos na normal de um trecho da divisa de Guaira com o Paraguai/MS.
+  assertEquals(municipioDoPonto(-24.13614, -54.34228)?.ibge, '4108809')
+  assertEquals(municipioDoPonto(-24.13444, -54.34943), null)
+})
+
+Deno.test('empate de distancia fica com o menor codigo IBGE', () => {
+  // Pontos fora da malha, equidistantes (a menos de 1e-15 km) de dois
+  // municipios que dividem o vertice da divisa estadual. Sem a margem de
+  // empate, o resultado dependia do ultimo bit do Math.hypot.
+  assertEquals(municipioDoPonto(-22.81043, -53.4128)?.ibge, '4120200') // Porto Rico x Querencia do Norte
+  assertEquals(municipioDoPonto(-26.47, -52.16)?.ibge, '4105706') // Clevelandia x Palmas
+  assertEquals(municipioDoPonto(-22.90355, -50.6361)?.ibge, '4113403') // Leopolis x Santa Mariana
 })

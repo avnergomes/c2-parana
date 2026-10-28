@@ -26,6 +26,8 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+from frescor import agora_utc, leitura_rio_valida
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 load_dotenv()
@@ -206,13 +208,14 @@ def fetch_river_alerts(name_lookup: dict[str, str]) -> dict[str, str]:
     Quando o mesmo municipio tem multiplas estacoes, fica registrado o
     pior alerta (priority = normal < attention < alert < emergency).
     """
-    records = postgrest_get("river_levels", select="municipality,alert_level")
+    records = postgrest_get("river_levels", select="municipality,alert_level,level_cm,observed_at")
+    agora = agora_utc()
     priority = {"normal": 0, "attention": 1, "alert": 2, "emergency": 3}
     by_ibge: dict[str, str] = {}
     for r in records:
         mun = r.get("municipality")
         level = r.get("alert_level") or "normal"
-        if not mun:
+        if not mun or not leitura_rio_valida(r, agora):
             continue
         ibge = match_name_to_ibge(mun, name_lookup)
         if not ibge:

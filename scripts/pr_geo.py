@@ -5,10 +5,18 @@ malha): le public/data/municipios-pr.geojson, que gera o pr_geometria.ts
 das Edge Functions via scripts/gen_pr_geometria.py.
 
   1. ponto dentro de um poligono -> esse municipio (o primeiro, na ordem do
-     IBGE, se cair numa sobreposicao da malha simplificada);
-  2. senao, a borda mais proxima a ate `tolerancia_km` (padrao 2 km) ->
-     esse municipio (frestas da simplificacao e a linha da costa);
+     IBGE, se cair numa sobreposicao);
+  2. senao, a borda mais proxima a ate `tolerancia_km` (padrao 0,5 km) ->
+     esse municipio; empate a menos de 1e-9 km fica com o primeiro na ordem
+     do IBGE, para Python e Deno nao divergirem no ultimo bit;
   3. senao -> None: o ponto esta fora do PR e deve ser descartado.
+
+As divisas internas da malha sao compartilhadas vertice a vertice (sem
+frestas), entao a tolerancia so age na divisa estadual e na costa: recupera
+ponto paranaense que a simplificacao deixou de fora, ao custo de aceitar
+ponto vizinho a menos de 0,5 km. Cidades coladas na divisa (Porto Uniao-SC,
+Barra do Turvo-SP) ficam dentro dessa margem; Mafra-SC, Puerto Iguazu e
+Bernardo de Irigoyen-AR e Ciudad del Este-PY ficam fora.
 """
 
 import json
@@ -22,6 +30,8 @@ GEOJSON_PATH = os.path.join(
 
 KM_POR_GRAU_LAT = 110.574
 KM_POR_GRAU_LON_EQUADOR = 111.32
+TOLERANCIA_KM = 0.5
+EMPATE_KM = 1e-9
 
 _ANEIS = None
 
@@ -85,7 +95,7 @@ def distancia_ao_anel_km(lon, lat, coords):
     return melhor
 
 
-def municipio_do_ponto(lat, lon, tolerancia_km=2.0):
+def municipio_do_ponto(lat, lon, tolerancia_km=TOLERANCIA_KM):
     """{'ibge', 'nome'} do municipio que contem o ponto, ou None fora do PR."""
     if lat is None or lon is None or not (math.isfinite(lat) and math.isfinite(lon)):
         return None
@@ -99,13 +109,13 @@ def municipio_do_ponto(lat, lon, tolerancia_km=2.0):
     folga_lat = tolerancia_km / KM_POR_GRAU_LAT
     folga_lon = tolerancia_km / (KM_POR_GRAU_LON_EQUADOR * math.cos(math.radians(lat)))
     melhor = None
-    melhor_km = tolerancia_km
+    melhor_km = tolerancia_km + EMPATE_KM
     for a in aneis:
         if (lon < a["min_lon"] - folga_lon or lon > a["max_lon"] + folga_lon
                 or lat < a["min_lat"] - folga_lat or lat > a["max_lat"] + folga_lat):
             continue
         d = distancia_ao_anel_km(lon, lat, a["coords"])
-        if d <= melhor_km:
+        if d < melhor_km - EMPATE_KM:
             melhor_km = d
             melhor = a
     return {"ibge": melhor["ibge"], "nome": melhor["nome"]} if melhor else None

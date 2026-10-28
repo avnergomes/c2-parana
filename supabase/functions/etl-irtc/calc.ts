@@ -3,6 +3,8 @@
 // serem testaveis: npx deno test supabase/functions/etl-irtc/calc.test.ts
 // Espelho 1:1 das funcoes calc_* de scripts/etl_irtc.py.
 
+import { DENGUE_MAX_IDADE_DIAS } from '../_shared/frescor.ts'
+
 export const W_CLIMA = 0.25
 export const W_SAUDE = 0.25
 export const W_AMBIENTE = 0.20
@@ -12,10 +14,14 @@ export const W_AR = 0.15
 /** Versao do metodo gravada em irtc_scores.versao_metodo. */
 export const VERSAO_METODO = 'v1.1'
 
-/** Leitura mais velha que isso nao conta como dado do dominio. */
-export const CLIMA_MAX_IDADE_H = 36
-export const RIO_MAX_IDADE_H = 12
-export const DENGUE_MAX_IDADE_DIAS = 28
+// Idade maxima das leituras: compartilhada com os consumidores de river_levels.
+export {
+  AR_MAX_IDADE_H,
+  CLIMA_MAX_IDADE_H,
+  DENGUE_MAX_IDADE_DIAS,
+  leituraFresca,
+  RIO_MAX_IDADE_H,
+} from '../_shared/frescor.ts'
 
 export type Avaliacao = [score: number, temDado: boolean]
 
@@ -100,14 +106,6 @@ export function semanaEpiFresca(ano: number, semana: number, agora: Date, maxDia
   if (!Number.isFinite(ano) || !Number.isFinite(semana) || semana < 1) return false
   const fim = inicioSemanaEpi(ano, semana).getTime() + 7 * 86_400_000
   return agora.getTime() - fim <= maxDias * 86_400_000
-}
-
-/** Leitura com timestamp de ate `maxHoras` horas atras. */
-export function leituraFresca(observedAt: string | null | undefined, agora: Date, maxHoras: number): boolean {
-  if (!observedAt) return false
-  const t = Date.parse(observedAt)
-  if (!Number.isFinite(t)) return false
-  return agora.getTime() - t <= maxHoras * 3_600_000
 }
 
 export interface DominioAvaliado {

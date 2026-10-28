@@ -15,6 +15,8 @@ import requests
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
+from frescor import RIO_MAX_IDADE_H
+
 load_dotenv()
 
 # ─── SUPABASE CONFIG ────────────────────────────────────────────────
@@ -179,9 +181,13 @@ def _fetch_ambiente():
 
 
 def _fetch_hidro():
-    """Busca níveis de rios."""
+    """Busca níveis de rios: so estacao com nivel medido ha ate RIO_MAX_IDADE_H
+    (uma cota de emergencia de dias atras nao e mais o estado do rio)."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=RIO_MAX_IDADE_H)).strftime("%Y-%m-%dT%H:%M:%SZ")
     records = pg_get("river_levels", {
         "select": "station_code,station_name,river_name,municipality,level_cm,flow_m3s,alert_level,observed_at",
+        "level_cm": "not.is.null",
+        "observed_at": f"gte.{cutoff}",
     })
     return records
 
