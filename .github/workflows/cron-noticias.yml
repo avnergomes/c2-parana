@@ -3,8 +3,8 @@
 name: ETL Notícias (RSS)
 
 on:
-  schedule:
-    - cron: '0 */2 * * *'   # A cada 2 horas (12 exec/dia)
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch:
 
 jobs:

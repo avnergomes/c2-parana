@@ -4,8 +4,8 @@
 name: ETL Projecao Dengue
 
 on:
-  schedule:
-    - cron: '0 10 * * *'   # Diario as 07:00 BRT (10:00 UTC)
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch:
 
 env:

@@ -3,8 +3,8 @@
 name: ETL Legislativo (ALEP)
 
 on:
-  schedule:
-    - cron: '0 14 * * 1-5'   # Dias uteis as 14h UTC (11h BRT) - ALEP funciona melhor em horario comercial
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch:
 
 jobs:

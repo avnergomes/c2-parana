@@ -3,9 +3,8 @@
 name: ETL Saude (InfoDengue)
 
 on:
-  schedule:
-    - cron: '0 8 * * 1'    # Segunda: run completo (399 municipios)
-    - cron: '0 12 * * 3,5' # Quarta e sexta: run rapido (top 50)
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch:
     inputs:
       full_run:

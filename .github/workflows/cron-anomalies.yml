@@ -4,8 +4,8 @@
 name: ETL Anomalias Estatisticas
 
 on:
-  schedule:
-    - cron: '45 */6 * * *'   # A cada 6 horas (offset dos demais crons)
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch:
 
 env:

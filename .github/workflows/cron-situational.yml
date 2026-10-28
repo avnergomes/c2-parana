@@ -1,8 +1,8 @@
 name: ETL Relatorio Situacional (Fase 3.B)
 
 on:
-  schedule:
-    - cron: '0 9 * * *'  # 06:00 BRT = 09:00 UTC, diario
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch: {}
 
 jobs:

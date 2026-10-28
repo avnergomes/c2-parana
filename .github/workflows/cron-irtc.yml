@@ -2,8 +2,8 @@
 name: ETL IRTC (Índice de Risco Territorial)
 
 on:
-  schedule:
-    - cron: '30 */6 * * *'   # A cada 6 horas (30min após ambiente)
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch:
 
 jobs:

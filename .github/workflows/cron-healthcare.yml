@@ -3,8 +3,8 @@
 name: ETL Healthcare (Leitos SUS)
 
 on:
-  schedule:
-    - cron: '0 9 * * *'  # Diario as 9:00 UTC (6:00 BRT)
+  # schedule removido em 2026-10-28: roda no pg_cron (etl.expected_cadence, runtime supabase-edge);
+  # o agendamento aqui duplicava toda escrita no banco.
   workflow_dispatch: {}
 
 jobs:
