@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { armadilhas, chaveData, coletores, construir, pluviometros, pulverizacoes, safraAtual, talhoes } from './transform.js';
+import { armadilhas, chaveData, coletores, construir, limites, pluviometros, pulverizacoes, resumoErroLogin, safraAtual, talhoes, wktParaGeometria } from './transform.js';
 
 const base = { fieldId: 'f1', propertyId: 'p1', produtorId: 'ID-PRODUTOR', tecnicosIds: 'ID-TECNICO', municipio: 'São João do Ivaí', produtor: 'Conceição', latitude: -24.5, longitude: -51.5 };
+
+test('erro de login expõe campos, nunca o corpo ecoado', () => {
+  assert.equal(resumoErroLogin({ message: 'SENHA-SECRETA', code: 1 }), 'chaves message,code');
+  assert.equal(resumoErroLogin(null), 'sem JSON');
+});
+
+test('erro de login Celebrate/Joi: campo e regra, nunca valor citado', () => {
+  const faltando = { statusCode: 400, validation: { body: { source: 'body', keys: ['cpf'], message: '"cpf" is required' } } };
+  assert.equal(resumoErroLogin(faltando), 'body:cpf:"cpf" is required');
+  const email = { validation: { body: { keys: ['email'], message: '"email" must be a valid email' } } };
+  assert.equal(resumoErroLogin(email), 'body:email:"email" must be a valid email');
+  const eco = { validation: { body: { keys: ['user'], message: '"user" with value "SENHA-SECRETA" fails to match the required pattern' } } };
+  assert.equal(resumoErroLogin(eco), 'body:user:regra omitida');
+});
 
 test('datas dd/mm/aaaa ordenam como ISO', () => {
   assert.equal(chaveData('05/11/2026'), '2026-11-05');
@@ -16,9 +30,32 @@ test('safra corrente: ignora a futura e vira só no 2º semestre', () => {
   assert.equal(safraAtual([], new Date('2026-11-08')), null);
 });
 
-test('coletor leva IDs e limites', () => {
+test('coletor leva IDs, sem o texto dos limites', () => {
   const p = coletores([{ ...base, limite_talhao: 'T', limite_propriedade: 'P' }]).features[0].properties;
-  assert.deepEqual([p.produtorId, p.tecnicosIds, p.limite_talhao, p.limite_propriedade], ['ID-PRODUTOR', 'ID-TECNICO', 'T', 'P']);
+  assert.deepEqual([p.produtorId, p.tecnicosIds, p.limite_talhao, p.limite_propriedade], ['ID-PRODUTOR', 'ID-TECNICO', undefined, undefined]);
+});
+
+const QUADRADO = 'POLYGON((-52.1 -24.1, -52.0 -24.1, -52.0 -24.0, -52.1 -24.1))';
+
+test('WKT vira geometria; texto ruim ou fora do Paraná vira null', () => {
+  assert.deepEqual(wktParaGeometria(QUADRADO).coordinates[0][1], [-52, -24.1]);
+  const multi = wktParaGeometria(`MULTIPOLYGON(${QUADRADO.slice(7)},((-51 -24,-50.9 -24,-50.9 -23.9,-51 -24)))`);
+  assert.equal(multi.type, 'MultiPolygon');
+  assert.equal(multi.coordinates.length, 2);
+  assert.equal(wktParaGeometria('POLYGON((-52 -24, -51 -24))'), null);
+  assert.equal(wktParaGeometria('POLYGON((10 10, 11 10, 11 11, 10 10))'), null);
+  assert.equal(wktParaGeometria('POINT(-52 -24)'), null);
+  assert.equal(wktParaGeometria(null), null);
+});
+
+test('limites: propriedade repetida entre talhões vira um polígono, desenhada por baixo', () => {
+  const gj = limites([
+    { ...base, limite_talhao: QUADRADO, limite_propriedade: 'POLYGON((-52.2 -24.2,-52 -24.2,-52 -24,-52.2 -24.2))' },
+    { ...base, limite_talhao: 'lixo', limite_propriedade: 'POLYGON((-52.2 -24.2,-52 -24.2,-52 -24,-52.2 -24.2))' },
+  ]);
+  assert.deepEqual(gj.features.map((f) => f.properties.tipo), ['propriedade', 'talhao']);
+  assert.equal(gj.features[0].properties.produtorId, 'ID-PRODUTOR');
+  assert.equal(gj.features[0].properties.cultura, undefined);
 });
 
 test('talhões juntam MID e MIP pelo fieldId e só levam os IDs pedidos', () => {
@@ -81,10 +118,10 @@ test('pluviômetro sem leitura ainda aparece, com zero', () => {
   assert.equal(q.ultima_leitura, '2026-11-02');
 });
 
-test('construir devolve os 5 arquivos do bucket', () => {
+test('construir devolve os 6 arquivos do bucket', () => {
   const vazio = { general: [], mid: [], mip: [], coletores: [], armadilhas: [], pulverizacoes: [], pluviometros: [] };
   assert.deepEqual(Object.keys(construir(vazio)).sort(), [
-    'manejo-armadilhas.geojson', 'manejo-coletores.geojson', 'manejo-pluviometros.geojson',
+    'manejo-armadilhas.geojson', 'manejo-coletores.geojson', 'manejo-limites.geojson', 'manejo-pluviometros.geojson',
     'manejo-pulverizacoes.geojson', 'manejo-talhoes.geojson',
   ]);
 });

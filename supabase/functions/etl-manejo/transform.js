@@ -25,6 +25,22 @@ const feature = (coordinates, properties) => ({ type: 'Feature', geometry: { typ
 const fc = (features) => ({ type: 'FeatureCollection', features });
 const numero = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : 0);
 
+/**
+ * Erro 400/422 do login -> só nomes de campo e tipo do erro. Validadores
+ * costumam ecoar o corpo recebido, então nenhum valor da resposta é copiado.
+ */
+export function resumoErroLogin(j) {
+  if (j?.validation && typeof j.validation === 'object' && !Array.isArray(j.validation)) {
+    // Celebrate/Joi: a mensagem pode citar o valor enviado, só passa regra conhecida.
+    const seguro = /^"[\w.]+" (is required|is not allowed( to be empty)?|must be (a valid \w+|a string))$/;
+    return Object.entries(j.validation).map(([fonte, v]) => {
+      const msg = String(v?.message ?? '');
+      return `${fonte}:${(v?.keys ?? []).join('+')}:${seguro.test(msg) ? msg : 'regra omitida'}`;
+    }).join(',');
+  }
+  return j && typeof j === 'object' ? `chaves ${Object.keys(j).join(',')}` : 'sem JSON';
+}
+
 /** Chave ordenável de data: aceita ISO e dd/mm/aaaa. */
 export function chaveData(v) {
   const s = String(v ?? '');
@@ -78,8 +94,38 @@ export function talhoes(general, mid, mip) {
 export function coletores(pontos) {
   return fc(pontos.flatMap((r) => {
     const c = coord(r);
-    return c ? [feature(c, escolher(r, [...COMUNS, 'estadio_fenologico', 'situacao', 'data_instalacao', 'primeiro_esporo', 'limite_talhao', 'limite_propriedade']))] : [];
+    return c ? [feature(c, escolher(r, [...COMUNS, 'estadio_fenologico', 'situacao', 'data_instalacao', 'primeiro_esporo']))] : [];
   }));
+}
+
+/** POLYGON/MULTIPOLYGON em WKT -> geometria GeoJSON; null se inválido ou fora do Paraná. */
+export function wktParaGeometria(wkt) {
+  const m = /^\s*(MULTI)?POLYGON\s*(\(.*\))\s*$/is.exec(String(wkt ?? ''));
+  if (!m) return null;
+  const num = String.raw`-?[\d.]+(?:e-?\d+)?`;
+  const texto = m[2].replace(new RegExp(`(${num})\\s+(${num})`, 'gi'), '[$1,$2]').replace(/\(/g, '[').replace(/\)/g, ']');
+  let coordinates;
+  try {
+    coordinates = JSON.parse(texto);
+  } catch {
+    return null;
+  }
+  const poligonos = m[1] ? coordinates : [coordinates];
+  const aneis = poligonos.flat();
+  const ok = aneis.every((a) => a.length >= 4) && aneis.flat().every(([longitude, latitude]) => coord({ longitude, latitude }));
+  return ok ? { type: m[1] ? 'MultiPolygon' : 'Polygon', coordinates } : null;
+}
+
+const CAMPOS_PROPRIEDADE = ['municipio', 'hierarquia', 'produtor', 'produtorId', 'tecnicosIds', 'safra', 'instituicao', 'responsavel_tecnico'];
+
+/** Polígonos de propriedade e talhão, sem repetição; propriedade antes, para ficar por baixo. */
+export function limites(rows) {
+  const porTipo = (campo, tipo, campos) =>
+    [...new Map(rows.filter((r) => r[campo]).map((r) => [r[campo], r]))].flatMap(([wkt, r]) => {
+      const geometry = wktParaGeometria(wkt);
+      return geometry ? [{ type: 'Feature', geometry, properties: { tipo, ...escolher(r, campos) } }] : [];
+    });
+  return fc([...porTipo('limite_propriedade', 'propriedade', CAMPOS_PROPRIEDADE), ...porTipo('limite_talhao', 'talhao', COMUNS)]);
 }
 
 export function armadilhas(rows) {
@@ -129,6 +175,7 @@ export function construir({ general, mid, mip, coletores: pts, armadilhas: arm, 
   return {
     'manejo-talhoes.geojson': talhoes(general, mid, mip),
     'manejo-coletores.geojson': coletores(pts),
+    'manejo-limites.geojson': limites(pts),
     'manejo-armadilhas.geojson': armadilhas(arm),
     'manejo-pulverizacoes.geojson': pulverizacoes(pul),
     'manejo-pluviometros.geojson': pluviometros(plu),

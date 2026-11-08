@@ -8,7 +8,7 @@
 // controlador (IDR-Paraná) antes de ampliar o acesso.
 
 import { fetchJson, fetchWithRetry, runEtl, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
-import { construir, safraAtual } from './transform.js'
+import { construir, resumoErroLogin, safraAtual } from './transform.js'
 
 const BASE = 'https://idr.manejo.app/api'
 const BUCKET_PRIVADO = 'datageo-privado'
@@ -30,27 +30,20 @@ type Linha = Record<string, unknown>
 const lista = (j: unknown): Linha[] =>
   (Array.isArray(j) ? j : (Object.values((j ?? {}) as object).find(Array.isArray) ?? [])) as Linha[]
 
-// 400/422 = formato do corpo errado, tenta o próximo. Qualquer outro erro para
-// na hora: repetir senha em 401 pode bloquear a conta. retries: 1 pelo mesmo motivo.
-async function login(user: string, password: string): Promise<string> {
-  for (const campo of ['email', 'username', 'login']) {
-    const resp = await fetchWithRetry(`${BASE}/users/login/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ [campo]: user, password }),
-      retries: 1,
-    })
-    if (resp.status === 400 || resp.status === 422) {
-      await resp.body?.cancel()
-      continue
-    }
-    if (!resp.ok) throw new Error(`login Manejo: HTTP ${resp.status} (campo ${campo})`)
-    const j = await resp.json()
-    const token = j.token ?? j.access_token ?? j.accessToken ?? j.data?.token ?? j.data?.access_token ?? j.data?.accessToken
-    if (!token) throw new Error(`login Manejo: resposta sem token, chaves: ${Object.keys(j).join(',')}`)
-    return String(token)
-  }
-  throw new Error('login Manejo: formato do corpo recusado (400/422) em email, username e login')
+// retries: 1 porque repetir senha pode bloquear a conta.
+async function login(usernameOrEmail: string, password: string): Promise<string> {
+  const resp = await fetchWithRetry(`${BASE}/users/login/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ usernameOrEmail, password }),
+    retries: 1,
+  })
+  if (resp.status === 400) throw new Error(`login Manejo: 400 ${resumoErroLogin(await resp.json().catch(() => null))}`)
+  if (!resp.ok) throw new Error(`login Manejo: HTTP ${resp.status}`)
+  const j = await resp.json()
+  const token = j.token ?? j.access_token ?? j.accessToken ?? j.data?.token ?? j.data?.access_token ?? j.data?.accessToken
+  if (!token) throw new Error(`login Manejo: resposta sem token, chaves: ${Object.keys(j).join(',')}`)
+  return String(token)
 }
 
 Deno.serve((req: Request) =>
@@ -75,9 +68,6 @@ Deno.serve((req: Request) =>
     const linhas: Record<string, Linha[]> = {}
     for (const [nome, caminho] of Object.entries(RELATORIOS)) linhas[nome] = await get(`${caminho}?${query}`)
 
-    // ponytail: Coletor Geral ainda sem camada; os campos saem aqui para decidir se vale.
-    const extended = await get(`mid-collector-report-extended/?${query}`)
-
     const arquivos = construir(linhas as Parameters<typeof construir>[0])
     const results: Record<string, number> = {}
     let vazios = 0
@@ -101,10 +91,6 @@ Deno.serve((req: Request) =>
       categorias: categorias.length,
       linhas: Object.fromEntries(Object.entries(linhas).map(([k, v]) => [k, v.length])),
       features: results,
-      campos_extended: Object.keys(extended[0] ?? {}),
-      linhas_extended: extended.length,
-      // ponytail: diagnóstico da 1ª carga; sai quando os limites virarem polígono.
-      formato_limite: String(linhas.coletores.find((r) => r.limite_talhao)?.limite_talhao ?? '').slice(0, 20),
     }
   })
 )
