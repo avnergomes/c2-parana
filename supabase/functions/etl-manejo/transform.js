@@ -91,10 +91,11 @@ export function talhoes(general, mid, mip) {
   }));
 }
 
-export function coletores(pontos) {
+/** `ibgeDe`: nome do município -> código IBGE; sem casamento o campo fica de fora. */
+export function coletores(pontos, ibgeDe = () => null) {
   return fc(pontos.flatMap((r) => {
     const c = coord(r);
-    return c ? [feature(c, escolher(r, [...COMUNS, 'estadio_fenologico', 'situacao', 'data_instalacao', 'primeiro_esporo']))] : [];
+    return c ? [feature(c, escolher({ ...r, ibge: ibgeDe(r.municipio) }, [...COMUNS, 'ibge', 'estadio_fenologico', 'situacao', 'data_instalacao', 'primeiro_esporo']))] : [];
   }));
 }
 
@@ -171,10 +172,10 @@ export function pluviometros(rows) {
 }
 
 /** @returns {Record<string, object>} arquivo do bucket -> FeatureCollection */
-export function construir({ general, mid, mip, coletores: pts, armadilhas: arm, pulverizacoes: pul, pluviometros: plu }) {
+export function construir({ general, mid, mip, coletores: pts, armadilhas: arm, pulverizacoes: pul, pluviometros: plu }, ibgeDe) {
   return {
     'manejo-talhoes.geojson': talhoes(general, mid, mip),
-    'manejo-coletores.geojson': coletores(pts),
+    'manejo-coletores.geojson': coletores(pts, ibgeDe),
     'manejo-limites.geojson': limites(pts),
     'manejo-armadilhas.geojson': armadilhas(arm),
     'manejo-pulverizacoes.geojson': pulverizacoes(pul),

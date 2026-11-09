@@ -35,7 +35,15 @@ test('coletor leva IDs, sem o texto dos limites', () => {
   assert.deepEqual([p.produtorId, p.tecnicosIds, p.limite_talhao, p.limite_propriedade], ['ID-PRODUTOR', 'ID-TECNICO', undefined, undefined]);
 });
 
-const QUADRADO = 'POLYGON((-52.1 -24.1, -52.0 -24.1, -52.0 -24.0, -52.1 -24.1))';
+test('coletor leva o IBGE do município; sem casamento o campo fica de fora', () => {
+  const ibgeDe = (m) => (m === 'São João do Ivaí' ? '4125209' : undefined);
+  const [casou, semCasar] = coletores([base, { ...base, municipio: 'Outro' }], ibgeDe).features.map((f) => f.properties);
+  assert.equal(casou.ibge, '4125209');
+  assert.equal(casou.municipio, 'São João do Ivaí');
+  assert.equal('ibge' in semCasar, false);
+});
+
+const QUADRADO ='POLYGON((-52.1 -24.1, -52.0 -24.1, -52.0 -24.0, -52.1 -24.1))';
 
 test('WKT vira geometria; texto ruim ou fora do Paraná vira null', () => {
   assert.deepEqual(wktParaGeometria(QUADRADO).coordinates[0][1], [-52, -24.1]);

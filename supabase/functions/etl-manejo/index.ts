@@ -8,6 +8,7 @@
 // controlador (IDR-Paraná) antes de ampliar o acesso.
 
 import { fetchJson, fetchWithRetry, runEtl, type RunResult, type SupabaseClient } from '../_shared/etl.ts'
+import { buildNameLookup, stripAccentsLower } from '../_shared/pr_municipios.ts'
 import { construir, resumoErroLogin, safraAtual } from './transform.js'
 
 const BASE = 'https://idr.manejo.app/api'
@@ -68,7 +69,8 @@ Deno.serve((req: Request) =>
     const linhas: Record<string, Linha[]> = {}
     for (const [nome, caminho] of Object.entries(RELATORIOS)) linhas[nome] = await get(`${caminho}?${query}`)
 
-    const arquivos = construir(linhas as Parameters<typeof construir>[0])
+    const nomes = buildNameLookup()
+    const arquivos = construir(linhas as Parameters<typeof construir>[0], (m: unknown) => nomes.get(stripAccentsLower(String(m ?? ''))))
     const results: Record<string, number> = {}
     let vazios = 0
     for (const [nome, gj] of Object.entries(arquivos)) {
@@ -91,6 +93,7 @@ Deno.serve((req: Request) =>
       categorias: categorias.length,
       linhas: Object.fromEntries(Object.entries(linhas).map(([k, v]) => [k, v.length])),
       features: results,
+      coletores_sem_ibge: arquivos['manejo-coletores.geojson'].features.filter((f) => !f.properties.ibge).length,
     }
   })
 )
